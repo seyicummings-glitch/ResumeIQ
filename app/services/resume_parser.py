@@ -11,6 +11,9 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tessera
 # Path to Poppler bin folder
 POPPLER_PATH = r"C:\poppler\poppler-26.02.0\Library\bin"
 
+# Combine all installed languages so Tesseract can detect and read any of them
+OCR_LANGUAGES = "eng+fra+spa+deu+por+ara+chi_sim+hin+rus+ita+tur"
+
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     reader = PdfReader(io.BytesIO(file_bytes))
@@ -29,7 +32,7 @@ def extract_text_with_ocr(file_bytes: bytes) -> str:
     images = convert_from_bytes(file_bytes, poppler_path=POPPLER_PATH)
     text = ""
     for image in images:
-        text += pytesseract.image_to_string(image) + "\n"
+        text += pytesseract.image_to_string(image, lang=OCR_LANGUAGES) + "\n"
     return text
 
 
@@ -52,6 +55,6 @@ def extract_resume_text(filename: str, file_bytes: bytes) -> str:
         return extract_text_from_txt(file_bytes)
     elif filename.lower().endswith((".png", ".jpg", ".jpeg")):
         image = Image.open(io.BytesIO(file_bytes))
-        return pytesseract.image_to_string(image)
+        return pytesseract.image_to_string(image, lang=OCR_LANGUAGES)
     else:
         raise ValueError("Unsupported file type. Please upload PDF, DOCX, TXT, PNG, or JPG.")
