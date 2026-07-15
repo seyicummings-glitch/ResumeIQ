@@ -1,9 +1,14 @@
 from fastapi import FastAPI
-from app.routes import resume
+from app.routes import resume, auth
+from app.database import engine, Base
+from app.models import models
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="ResumeIQ API")
 
 app.include_router(resume.router)
+app.include_router(auth.router)
 
 
 @app.get("/")
