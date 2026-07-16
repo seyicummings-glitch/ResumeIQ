@@ -1,27 +1,35 @@
 import re
+from collections import Counter
 
-
-COMMON_SKILLS = [
-    "python", "java", "javascript", "typescript", "react", "angular", "vue",
-    "fastapi", "django", "flask", "node", "express", "sql", "postgresql",
-    "mysql", "mongodb", "docker", "kubernetes", "aws", "azure", "gcp",
-    "git", "html", "css", "rest api", "graphql", "machine learning",
-    "data analysis", "c++", "c#", "go", "rust", "swift", "kotlin",
-    "tensorflow", "pytorch", "linux", "agile", "scrum", "ci/cd"
-]
 
 EXPERIENCE_PATTERN = re.compile(r"(\d+)\s*\+?\s*(?:years?|yrs?)\s*(?:of)?\s*experience", re.IGNORECASE)
 
 QUALIFICATION_KEYWORDS = [
     "bachelor", "master", "phd", "degree", "certification", "certified",
-    "diploma", "b.sc", "m.sc", "b.tech", "m.tech"
+    "diploma", "b.sc", "m.sc", "b.tech", "m.tech", "j.d.", "jd", "md",
+    "license", "licensed", "associate degree", "high school"
 ]
+
+STOPWORDS = {
+    "the", "and", "for", "with", "you", "our", "are", "will", "have",
+    "this", "that", "your", "from", "who", "what", "role", "job",
+    "we", "a", "an", "to", "of", "in", "on", "as", "is", "be", "at",
+    "or", "must", "should", "can", "not", "all", "any", "also", "into",
+    "such", "than", "then", "them", "they", "their", "there", "these",
+    "those", "it", "its", "by", "if", "but", "so", "up", "out", "about"
+}
 
 
 def extract_required_skills(text: str) -> list:
-    text_lower = text.lower()
-    found_skills = [skill for skill in COMMON_SKILLS if skill in text_lower]
-    return sorted(set(found_skills))
+    text_clean = re.sub(r"[^a-zA-Z0-9\s\-]", " ", text.lower())
+    words = text_clean.split()
+
+    candidate_terms = [w for w in words if len(w) > 3 and w not in STOPWORDS]
+
+    word_counts = Counter(candidate_terms)
+    top_terms = [word for word, count in word_counts.most_common(25)]
+
+    return sorted(set(top_terms))
 
 
 def extract_experience_level(text: str) -> str:
@@ -41,15 +49,8 @@ def extract_keywords(text: str) -> list:
     text_clean = re.sub(r"[^a-zA-Z0-9\s]", " ", text.lower())
     words = text_clean.split()
 
-    stopwords = {
-        "the", "and", "for", "with", "you", "our", "are", "will", "have",
-        "this", "that", "your", "from", "who", "what", "role", "job",
-        "we", "a", "an", "to", "of", "in", "on", "as", "is", "be", "at"
-    }
+    keywords = [w for w in words if len(w) > 3 and w not in STOPWORDS]
 
-    keywords = [w for w in words if len(w) > 3 and w not in stopwords]
-
-    from collections import Counter
     word_counts = Counter(keywords)
     top_keywords = [word for word, count in word_counts.most_common(30)]
 
