@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routes import resume, auth, job_description, matching
+from app.routes import resume, auth, job_description, matching, github_analyzer
 from app.database import engine, Base
 from app.models import models
 
@@ -11,6 +11,7 @@ app.include_router(resume.router)
 app.include_router(auth.router)
 app.include_router(job_description.router)
 app.include_router(matching.router)
+app.include_router(github_analyzer.router)
 
 
 @app.get("/")
