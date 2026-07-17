@@ -1,14 +1,20 @@
-from datetime import datetime, timedelta
+﻿from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 import os
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from app.database import get_db
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key-later")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 PASSWORD_RESET_EXPIRE_MINUTES = 5
+
+oauth2_scheme = HTTPBearer()
 
 
 def hash_password(password: str) -> str:
@@ -51,14 +57,6 @@ def verify_password_reset_token(token: str):
         return None
 
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
-from app.database import get_db
-
-oauth2_scheme = HTTPBearer()
-
-
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     token = credentials.credentials
     from app.models.models import User
@@ -82,3 +80,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(oauth2_
         raise credentials_exception
 
     return user
+
+
+def require_admin(current_user = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return current_user

@@ -17,6 +17,7 @@ class UserResponse(BaseModel):
     id: int
     email: str
     full_name: str | None = None
+    role: str
     created_at: datetime
 
     class Config:

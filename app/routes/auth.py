@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+﻿from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import User
@@ -17,6 +17,7 @@ from app.security import (
     get_current_user,
     create_password_reset_token,
     verify_password_reset_token,
+    require_admin,
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -89,3 +90,8 @@ def confirm_password_reset(data: PasswordResetConfirm, db: Session = Depends(get
     db.commit()
 
     return {"message": "Password has been reset successfully."}
+
+
+@router.get("/admin-only")
+def admin_only_route(current_user: User = Depends(require_admin)):
+    return {"message": f"Welcome, admin {current_user.email}!"}
