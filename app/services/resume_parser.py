@@ -1,3 +1,5 @@
+import os
+from dotenv import load_dotenv
 from pypdf import PdfReader
 from docx import Document
 import io
@@ -5,11 +7,17 @@ import pytesseract
 from pdf2image import convert_from_bytes
 from PIL import Image
 
-# Path to Tesseract executable
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+load_dotenv()
 
-# Path to Poppler bin folder
-POPPLER_PATH = r"C:\poppler\poppler-26.02.0\Library\bin"
+# Path to Tesseract executable — override via TESSERACT_CMD env var for non-default installs
+pytesseract.pytesseract.tesseract_cmd = os.getenv(
+    "TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
+
+# Path to Poppler bin folder — override via POPPLER_PATH env var
+POPPLER_PATH = os.getenv(
+    "POPPLER_PATH", r"C:\poppler\poppler-26.02.0\Library\bin"
+)
 
 # Combine all installed languages so Tesseract can detect and read any of them
 OCR_LANGUAGES = "eng+fra+spa+deu+por+ara+chi_sim+hin+rus+ita+tur"
