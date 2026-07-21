@@ -1,9 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 import requests
 from bs4 import BeautifulSoup
 from app.services.job_description_parser import parse_job_description
 from app.services.resume_parser import extract_resume_text
+from app.database import get_db
+from app.models.models import JobDescription, User
+from app.schemas import JobDescriptionCreate, JobDescriptionResponse
+from app.security import get_current_user
 
 router = APIRouter(prefix="/job-description", tags=["Job Description"])
 
@@ -70,3 +75,28 @@ def parse_jd_url(data: JobDescriptionURLInput):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing URL: {str(e)}")
+
+
+@router.post("/save", response_model=JobDescriptionResponse)
+def save_job_description(
+    data: JobDescriptionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    new_jd = JobDescription(
+        user_id=current_user.id,
+        title=data.title,
+        content=data.content
+    )
+    db.add(new_jd)
+    db.commit()
+    db.refresh(new_jd)
+    return new_jd
+
+
+@router.get("/my-job-descriptions", response_model=list[JobDescriptionResponse])
+def get_my_job_descriptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return db.query(JobDescription).filter(JobDescription.user_id == current_user.id).all()
