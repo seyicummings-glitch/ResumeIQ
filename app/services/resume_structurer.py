@@ -1,13 +1,49 @@
 import re
 
-# Common section headers found in resumes (add more as you test with real resumes)
+# Common section headers found in resumes (English + French/Spanish/German/Portuguese variants)
 SECTION_HEADERS = {
-    "summary": ["summary", "professional summary", "objective", "profile"],
-    "skills": ["skills", "technical skills", "core competencies"],
-    "experience": ["experience", "work experience", "professional experience", "employment history"],
-    "education": ["education", "academic background"],
-    "certifications": ["certifications", "certificates", "licenses"],
-    "projects": ["projects", "personal projects", "key projects"],
+    "summary": [
+        "summary", "professional summary", "objective", "profile",
+        "résumé", "profil", "objectif professionnel", "sommaire",
+        "resumen", "perfil", "objetivo profesional", "objetivo",
+        "zusammenfassung", "werdegang", "über mich",
+        "resumo", "perfil profissional",
+    ],
+    "skills": [
+        "skills", "technical skills", "core competencies",
+        "compétences", "compétences techniques", "compétences clés",
+        "habilidades", "competencias", "competencias técnicas",
+        "fähigkeiten", "kenntnisse", "fachkenntnisse",
+        "competências", "habilidades técnicas",
+    ],
+    "experience": [
+        "experience", "work experience", "professional experience", "employment history",
+        "expérience", "expérience professionnelle", "parcours professionnel",
+        "experiencia", "experiencia laboral", "experiencia profesional",
+        "berufserfahrung", "erfahrung",
+        "experiência", "experiência profissional",
+    ],
+    "education": [
+        "education", "academic background",
+        "éducation", "formation", "formation académique", "études",
+        "educación", "formación académica",
+        "ausbildung", "bildung",
+        "educação", "formação acadêmica",
+    ],
+    "certifications": [
+        "certifications", "certificates", "licenses",
+        "certificats",
+        "certificaciones", "certificados",
+        "zertifikate", "zertifizierungen",
+        "certificações",
+    ],
+    "projects": [
+        "projects", "personal projects", "key projects",
+        "projets", "projets personnels",
+        "proyectos", "proyectos personales",
+        "projekte",
+        "projetos", "projetos pessoais",
+    ],
 }
 
 
