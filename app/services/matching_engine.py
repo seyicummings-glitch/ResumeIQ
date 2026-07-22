@@ -1,7 +1,23 @@
+"""
+Rule-based resume-to-job-description matching engine.
+
+No machine learning or AI models are used here — every score below is
+computed from deterministic string/set operations over parsed resume and
+job description data. The final score is a fixed weighted sum:
+
+    overall_match_score = skill_score * 0.5
+                         + experience_score * 0.3
+                         + qualification_score * 0.2
+
+Required skills are weighted highest since they're the most direct signal
+of fit, experience next, and qualifications (degrees/certs) last since
+they're the weakest predictor of job performance for most roles.
+"""
 import re
 
 
 def calculate_skill_match(resume_skills: list, jd_required_skills: list) -> dict:
+    """Score skill overlap as the fraction of JD-required skills present in the resume (set intersection)."""
     resume_skills_lower = set(s.lower() for s in resume_skills)
     jd_skills_lower = set(s.lower() for s in jd_required_skills)
 
@@ -21,6 +37,7 @@ def calculate_skill_match(resume_skills: list, jd_required_skills: list) -> dict
 
 
 def calculate_experience_match(resume_text: str, jd_experience_level: str) -> dict:
+    """Score experience fit by regex-extracting a required year count from the JD and the candidate's max stated years."""
     if jd_experience_level == "Not specified":
         return {"experience_score": 100, "note": "No specific experience requirement"}
 
@@ -48,6 +65,7 @@ def calculate_experience_match(resume_text: str, jd_experience_level: str) -> di
 
 
 def calculate_qualification_match(resume_text: str, jd_qualifications: list) -> dict:
+    """Score qualification fit as the fraction of JD-required qualification keywords found via substring match in the resume."""
     if not jd_qualifications:
         return {"qualification_score": 100, "note": "No specific qualification required"}
 
@@ -69,6 +87,7 @@ def calculate_overall_match(
     jd_experience_level: str,
     jd_qualifications: list
 ) -> dict:
+    """Combine skill/experience/qualification scores into the final weighted (0.5/0.3/0.2) overall match score."""
     skill_result = calculate_skill_match(resume_skills, jd_required_skills)
     experience_result = calculate_experience_match(resume_text, jd_experience_level)
     qualification_result = calculate_qualification_match(resume_text, jd_qualifications)
