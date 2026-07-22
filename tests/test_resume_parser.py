@@ -19,3 +19,18 @@ def test_empty_txt_file():
     file_bytes = b""
     result = extract_resume_text("resume.txt", file_bytes)
     assert result == ""
+
+
+def test_extract_text_from_docx():
+    from docx import Document
+    import io
+
+    doc = Document()
+    doc.add_paragraph("Jane Doe")
+    doc.add_paragraph("Data Scientist, Python, SQL")
+    buf = io.BytesIO()
+    doc.save(buf)
+
+    result = extract_resume_text("resume.docx", buf.getvalue())
+    assert "Jane Doe" in result
+    assert "Python" in result
