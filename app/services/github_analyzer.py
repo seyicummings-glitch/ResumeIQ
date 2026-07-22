@@ -19,6 +19,10 @@ def fetch_github_profile(username: str) -> dict:
 
     if response.status_code == 404:
         raise ValueError(f"GitHub user '{username}' not found.")
+    if response.status_code == 403:
+        raise RuntimeError(
+            "GitHub API rate limit exceeded. Please try again later or configure a GitHub token."
+        )
     response.raise_for_status()
 
     data = response.json()
@@ -39,6 +43,10 @@ def fetch_github_repos(username: str, limit: int = 10) -> list:
 
     if response.status_code == 404:
         raise ValueError(f"GitHub user '{username}' not found.")
+    if response.status_code == 403:
+        raise RuntimeError(
+            "GitHub API rate limit exceeded. Please try again later or configure a GitHub token."
+        )
     response.raise_for_status()
 
     repos = response.json()
