@@ -1,8 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.services.resume_parser import extract_resume_text
 from app.services.resume_structurer import structure_resume
 from app.services.ats_scorer import calculate_ats_score
+from app.services.ai_suggestions import generate_resume_suggestions
+from app.services.job_description_parser import parse_job_description
+from app.services.keyword_analyzer import analyze_keywords
 from app.database import get_db
 from app.models.models import Resume, User
 from app.security import get_current_user
@@ -94,6 +97,39 @@ async def ats_score_resume(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error scoring resume: {str(e)}")
+
+
+@router.post("/ai-suggestions")
+async def ai_suggestions_resume(
+    file: UploadFile = File(...),
+    job_description: str = Form(None)
+):
+    try:
+        file_bytes = await file.read()
+        validate_file(file, file_bytes)
+
+        text = extract_resume_text(file.filename, file_bytes)
+        structured_data = structure_resume(text)
+        ats_result = calculate_ats_score(file.filename, text, structured_data)
+
+        fallback_data = {"ats_issues": ats_result["issues"]}
+        if job_description:
+            jd_parsed = parse_job_description(job_description)
+            keyword_result = analyze_keywords(text, jd_parsed["keywords"])
+            fallback_data["missing_keywords"] = keyword_result["missing_keywords"]
+
+        result = generate_resume_suggestions(text, job_description, fallback_data)
+
+        return {
+            "filename": file.filename,
+            "ai_suggestions": result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating suggestions: {str(e)}")
 
 
 @router.post("/save")
