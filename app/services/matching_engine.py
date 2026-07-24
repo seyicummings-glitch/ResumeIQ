@@ -12,6 +12,14 @@ job description data. The final score is a fixed weighted sum:
 Required skills are weighted highest since they're the most direct signal
 of fit, experience next, and qualifications (degrees/certs) last since
 they're the weakest predictor of job performance for most roles.
+
+When GitHub language data is supplied as a secondary signal, the weights
+shift to make room for it (still summing to 100, still rule-based):
+
+    overall_match_score = skill_score * 0.45
+                         + experience_score * 0.25
+                         + qualification_score * 0.15
+                         + github_bonus_score * 0.15
 """
 import re
 
@@ -80,17 +88,48 @@ def calculate_qualification_match(resume_text: str, jd_qualifications: list) -> 
     }
 
 
+def calculate_github_bonus(github_languages: list, jd_required_skills: list) -> dict:
+    """Score overlap between a candidate's GitHub languages and JD-required skills (secondary signal, max 100)."""
+    if not jd_required_skills:
+        return {"github_bonus_score": 0, "matched_languages": []}
+
+    languages_lower = set(l.lower() for l in github_languages)
+    required_lower = set(s.lower() for s in jd_required_skills)
+    matched = sorted(languages_lower & required_lower)
+
+    score = round((len(matched) / len(required_lower)) * 100, 2)
+    return {"github_bonus_score": score, "matched_languages": matched}
+
+
 def calculate_overall_match(
     resume_text: str,
     resume_skills: list,
     jd_required_skills: list,
     jd_experience_level: str,
-    jd_qualifications: list
+    jd_qualifications: list,
+    github_languages: list | None = None
 ) -> dict:
-    """Combine skill/experience/qualification scores into the final weighted (0.5/0.3/0.2) overall match score."""
+    """Combine skill/experience/qualification scores (and, if supplied, a GitHub bonus) into the final weighted overall match score."""
     skill_result = calculate_skill_match(resume_skills, jd_required_skills)
     experience_result = calculate_experience_match(resume_text, jd_experience_level)
     qualification_result = calculate_qualification_match(resume_text, jd_qualifications)
+
+    if github_languages:
+        github_result = calculate_github_bonus(github_languages, jd_required_skills)
+        overall_score = round(
+            (skill_result["skill_score"] * 0.45) +
+            (experience_result["experience_score"] * 0.25) +
+            (qualification_result["qualification_score"] * 0.15) +
+            (github_result["github_bonus_score"] * 0.15),
+            2
+        )
+        return {
+            "overall_match_score": overall_score,
+            "skill_match": skill_result,
+            "experience_match": experience_result,
+            "qualification_match": qualification_result,
+            "github_match": github_result
+        }
 
     # Weighted overall score: skills matter most, then experience, then qualifications
     overall_score = round(

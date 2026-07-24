@@ -2,7 +2,7 @@ from app.services.job_description_parser import parse_job_description
 from app.services.matching_engine import calculate_overall_match
 
 
-def rank_jobs_for_resume(resume_text: str, resume_skills: list, job_descriptions: list) -> list:
+def rank_jobs_for_resume(resume_text: str, resume_skills: list, job_descriptions: list, github_languages: list | None = None) -> list:
     """job_descriptions: list of {"id": int, "title": str|None, "content": str}."""
     results = []
     for jd in job_descriptions:
@@ -12,16 +12,20 @@ def rank_jobs_for_resume(resume_text: str, resume_skills: list, job_descriptions
             resume_skills=resume_skills,
             jd_required_skills=parsed["required_skills"],
             jd_experience_level=parsed["experience_level"],
-            jd_qualifications=parsed["qualifications"]
+            jd_qualifications=parsed["qualifications"],
+            github_languages=github_languages
         )
-        results.append({
+        result = {
             "job_description_id": jd["id"],
             "title": jd.get("title"),
             "overall_match_score": match["overall_match_score"],
             "skill_match": match["skill_match"],
             "experience_match": match["experience_match"],
             "qualification_match": match["qualification_match"]
-        })
+        }
+        if "github_match" in match:
+            result["github_match"] = match["github_match"]
+        results.append(result)
 
     results.sort(key=lambda r: r["overall_match_score"], reverse=True)
     return results
