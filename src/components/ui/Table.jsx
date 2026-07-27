@@ -1,3 +1,5 @@
+import clsx from 'clsx'
+
 export function Table({ children }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
@@ -14,9 +16,9 @@ export function TableHead({ children }) {
   )
 }
 
-export function Th({ children, ...props }) {
+export function Th({ className, children, ...props }) {
   return (
-    <th scope="col" className="border-b border-border px-4 py-3 font-medium" {...props}>
+    <th scope="col" className={clsx('border-b border-border px-4 py-3 font-medium', className)} {...props}>
       {children}
     </th>
   )
@@ -26,9 +28,9 @@ export function TableBody({ children }) {
   return <tbody className="divide-y divide-border">{children}</tbody>
 }
 
-export function Td({ children, ...props }) {
+export function Td({ className, children, ...props }) {
   return (
-    <td className="px-4 py-3 text-text-h" {...props}>
+    <td className={clsx('px-4 py-3 text-text-h', className)} {...props}>
       {children}
     </td>
   )

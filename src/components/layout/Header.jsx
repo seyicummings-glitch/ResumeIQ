@@ -20,7 +20,7 @@ function navLinkClass({ isActive }) {
 }
 
 export default function Header() {
-  const { isAuthenticated, isAdmin, user, logout } = useAuth()
+  const { isAuthenticated, isAdmin, isLoading, user, logout } = useAuth()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const navigate = useNavigate()
 
@@ -41,15 +41,16 @@ export default function Header() {
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
-          {links.map((link) => (
-            <NavLink key={link.to} to={link.to} className={navLinkClass}>
-              {link.label}
-            </NavLink>
-          ))}
+          {!isLoading &&
+            links.map((link) => (
+              <NavLink key={link.to} to={link.to} className={navLinkClass}>
+                {link.label}
+              </NavLink>
+            ))}
         </nav>
 
         <div className="hidden items-center gap-2 md:flex">
-          {isAuthenticated ? (
+          {isLoading ? null : isAuthenticated ? (
             <>
               <span className="px-2 text-sm text-text">{user?.full_name || user?.email}</span>
               <Button variant="secondary" size="sm" onClick={handleLogout}>
@@ -80,7 +81,7 @@ export default function Header() {
         </button>
       </div>
 
-      {isMenuOpen && (
+      {isMenuOpen && !isLoading && (
         <nav id="mobile-nav" aria-label="Main" className="flex flex-col gap-1 border-t border-border px-4 py-3 md:hidden">
           {links.map((link) => (
             <NavLink key={link.to} to={link.to} className={navLinkClass} onClick={() => setIsMenuOpen(false)}>
