@@ -1,0 +1,108 @@
+import { getToken, clearToken } from '../auth/tokenStorage'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+
+export class ApiError extends Error {
+  constructor(status, message, detail) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
+let unauthorizedHandler = null
+
+/** Wired up once by AuthContext so any 401 anywhere in the app clears the session and redirects, without every page having to handle it. */
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler
+}
+
+function extractErrorMessage(detail) {
+  if (!detail) return 'Something went wrong. Please try again.'
+  if (typeof detail === 'string') return detail
+  // FastAPI validation errors: [{ loc, msg, type }, ...]
+  if (Array.isArray(detail)) return detail.map((d) => d.msg).filter(Boolean).join(' ')
+  return 'Something went wrong. Please try again.'
+}
+
+function buildUrl(path, query) {
+  let url = `${API_BASE_URL}${path}`
+  if (query) {
+    const params = new URLSearchParams()
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') params.set(key, value)
+    })
+    const qs = params.toString()
+    if (qs) url += `?${qs}`
+  }
+  return url
+}
+
+/**
+ * Shared fetch wrapper used by every api/* module.
+ * @param {string} path - route path, e.g. '/auth/login'
+ * @param {Object} [options]
+ * @param {string} [options.method]
+ * @param {any} [options.body] - a FormData instance is sent as multipart as-is; anything else is JSON-encoded
+ * @param {boolean} [options.auth] - attach the stored bearer token
+ * @param {Object} [options.query] - query string params
+ * @param {AbortSignal} [options.signal]
+ */
+export async function apiRequest(path, { method = 'GET', body, auth = false, query, signal } = {}) {
+  const headers = {}
+  let requestBody
+
+  if (body instanceof FormData) {
+    requestBody = body
+  } else if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    requestBody = JSON.stringify(body)
+  }
+
+  if (auth) {
+    const token = getToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
+  }
+
+  let response
+  try {
+    response = await fetch(buildUrl(path, query), { method, headers, body: requestBody, signal })
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Check your connection and try again.', null)
+  }
+
+  if (response.status === 204) return null
+
+  const text = await response.text()
+  let data = null
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = null
+    }
+  }
+
+  if (!response.ok) {
+    // A 401 on the login/register forms themselves means "wrong credentials," not "your session expired."
+    const isCredentialsCheck = path === '/auth/login' || path === '/auth/register'
+    if (response.status === 401 && !isCredentialsCheck) {
+      clearToken()
+      unauthorizedHandler?.()
+    }
+    throw new ApiError(response.status, extractErrorMessage(data?.detail), data?.detail)
+  }
+
+  return data
+}
+
+/** Builds a FormData body from a plain object, skipping undefined/null values. File/Blob values are appended as files, everything else as strings. */
+export function toFormData(fields) {
+  const formData = new FormData()
+  Object.entries(fields).forEach(([key, value]) => {
+    if (value === undefined || value === null) return
+    formData.append(key, value)
+  })
+  return formData
+}
