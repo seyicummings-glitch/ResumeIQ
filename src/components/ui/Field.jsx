@@ -2,7 +2,7 @@ import { useId } from 'react'
 import clsx from 'clsx'
 
 const fieldClasses =
-  'w-full rounded-lg border bg-bg px-3 py-2 text-text-h placeholder:text-text/60 disabled:opacity-50 transition-colors'
+  'w-full rounded-md border bg-bg px-3 py-2 text-text-h placeholder:text-text/60 disabled:opacity-50 transition-colors'
 
 /** Shared label/error/hint chrome for form fields — used by Input/TextArea/Select so every field announces errors the same accessible way. */
 export function useFieldIds(idProp) {

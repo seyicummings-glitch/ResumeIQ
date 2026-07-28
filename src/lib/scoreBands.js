@@ -6,7 +6,7 @@ export function getScoreBand(score) {
 }
 
 export const SCORE_BAND_COLORS = {
-  success: { text: 'text-success', bg: 'bg-success-bg', hex: '#15803d' },
-  warning: { text: 'text-warning', bg: 'bg-warning-bg', hex: '#a15c00' },
-  danger: { text: 'text-danger', bg: 'bg-danger-bg', hex: '#b91c1c' },
+  success: { text: 'text-success', bg: 'bg-success-bg', hex: 'var(--success)' },
+  warning: { text: 'text-warning', bg: 'bg-warning-bg', hex: 'var(--warning)' },
+  danger: { text: 'text-danger', bg: 'bg-danger-bg', hex: 'var(--danger)' },
 }

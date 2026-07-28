@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
-import { FileText, ListChecks } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { FileText, ListChecks, Save } from 'lucide-react'
 import { useResumes } from '../hooks/useResumes'
 import { useJobDescriptions } from '../hooks/useJobDescriptions'
 import { useRecommendations } from '../hooks/useRecommendations'
@@ -19,6 +19,7 @@ import FileDropzone from '../components/ui/FileDropzone'
 import TextArea from '../components/ui/TextArea'
 import ScoreGauge from '../components/charts/ScoreGauge'
 import ScoreBreakdownBars from '../components/charts/ScoreBreakdownBars'
+import { useToast } from '../components/ui/Toast'
 
 function toBreakdownItems(matchResult) {
   const items = [
@@ -30,8 +31,20 @@ function toBreakdownItems(matchResult) {
   return items
 }
 
-function RecommendationRow({ recommendation }) {
+function RecommendationRow({ recommendation, resumeId }) {
   const [expanded, setExpanded] = useState(false)
+  const { showToast } = useToast()
+  const queryClient = useQueryClient()
+
+  const saveMutation = useMutation({
+    mutationFn: () => matchingApi.saveAnalysis({ resumeId, jobDescriptionId: recommendation.job_description_id }),
+    onSuccess: () => {
+      showToast('Analysis saved — check Skill Assessment, Interview Practice, and Learning Roadmap for personalized results.', { tone: 'success' })
+      queryClient.invalidateQueries({ queryKey: ['analysisHistory'] })
+    },
+    onError: (error) => showToast(error.message, { tone: 'error' }),
+  })
+
   return (
     <div className="border-b border-border last:border-b-0">
       <button
@@ -44,11 +57,22 @@ function RecommendationRow({ recommendation }) {
         <ScoreBadge score={recommendation.overall_match_score} />
       </button>
       {expanded && (
-        <div className="px-4 pb-4">
+        <div className="flex flex-col gap-4 px-4 pb-4">
           <ScoreBreakdownBars
             items={toBreakdownItems(recommendation)}
             caption="Weighted: Skills 50% · Experience 30% · Qualifications 20% (or 45/25/15/15 with a GitHub bonus)"
           />
+          <Button
+            variant="secondary"
+            size="sm"
+            className="w-fit"
+            onClick={() => saveMutation.mutate()}
+            isLoading={saveMutation.isPending}
+            disabled={saveMutation.isSuccess}
+          >
+            <Save size={14} aria-hidden="true" />
+            {saveMutation.isSuccess ? 'Analysis saved' : 'Save this analysis'}
+          </Button>
         </div>
       )}
     </div>
@@ -172,7 +196,11 @@ export default function DashboardPage() {
         {recommendationsQuery.isSuccess && recommendationsQuery.data.recommendations.length > 0 && (
           <div>
             {recommendationsQuery.data.recommendations.map((recommendation) => (
-              <RecommendationRow key={recommendation.job_description_id} recommendation={recommendation} />
+              <RecommendationRow
+                key={recommendation.job_description_id}
+                recommendation={recommendation}
+                resumeId={Number(selectedResumeId)}
+              />
             ))}
           </div>
         )}

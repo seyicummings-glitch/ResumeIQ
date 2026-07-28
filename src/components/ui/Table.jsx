@@ -2,7 +2,7 @@ import clsx from 'clsx'
 
 export function Table({ children }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-border">
+    <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full min-w-max border-collapse text-left text-sm">{children}</table>
     </div>
   )

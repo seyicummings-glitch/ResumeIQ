@@ -42,12 +42,6 @@ export default function AdminSettingsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="rounded-lg bg-warning-bg px-3 py-2 text-xs text-warning">
-        Demo data: the backend has no settings endpoint yet, so these are saved on this device only. Maintenance
-        mode here does not actually affect the live backend (that's controlled by its own MAINTENANCE_MODE
-        environment variable).
-      </p>
-
       <Card className="max-w-lg">
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <label className="flex items-center gap-2 text-sm font-medium text-text-h">

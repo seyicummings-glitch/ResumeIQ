@@ -53,7 +53,7 @@ export default function Modal({ isOpen, onClose, title, children, footer }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className="relative w-full max-w-lg rounded-xl border border-border bg-bg p-6 shadow-xl"
+        className="relative w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-xl"
       >
         <div className="mb-4 flex items-start justify-between gap-4">
           <h2 id="modal-title" className="text-lg font-semibold text-text-h">

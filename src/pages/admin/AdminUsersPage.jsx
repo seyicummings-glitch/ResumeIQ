@@ -70,11 +70,6 @@ export default function AdminUsersPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="rounded-lg bg-warning-bg px-3 py-2 text-xs text-warning">
-        Demo data: the backend doesn't have user-management endpoints yet, so edits and deactivations here are saved
-        on this device only.
-      </p>
-
       <div className="flex flex-wrap gap-3">
         <div className="w-64">
           <Input label="Search" placeholder="Search by name or email…" value={search} onChange={(event) => setSearch(event.target.value)} />

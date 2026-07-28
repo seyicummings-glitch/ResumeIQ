@@ -1,20 +1,24 @@
-import { simulateLatency } from './sampleData/simulateLatency'
-import { analysisHistorySample } from './sampleData/analysisHistory.sample'
+import { apiRequest } from './client'
 
-// TODO: the backend has an AnalysisResult DB table but no route reads or
-// writes it yet. Swap these two functions for real apiRequest('/analysis/...')
-// calls once that endpoint exists — HistoryPage/HistoryDetailPage and
-// useAnalysisHistory don't need to change at all.
+function toHistoryRecord(row) {
+  return {
+    id: row.id,
+    resumeFilename: row.resume_filename,
+    jobTitle: row.job_description_title || 'Untitled job description',
+    overallScore: row.match_result.overall_match_score,
+    analyzedAt: row.created_at,
+    skillMatch: row.match_result.skill_match,
+    experienceMatch: row.match_result.experience_match,
+    qualificationMatch: row.match_result.qualification_match,
+  }
+}
 
-/** @returns {Promise<typeof analysisHistorySample>} */
 export async function getAnalysisHistory() {
-  await simulateLatency()
-  return analysisHistorySample
+  const rows = await apiRequest('/matching/history', { auth: true })
+  return rows.map(toHistoryRecord)
 }
 
 export async function getAnalysisDetail(id) {
-  await simulateLatency()
-  const record = analysisHistorySample.find((r) => r.id === id)
-  if (!record) throw new Error('Analysis record not found.')
-  return record
+  const row = await apiRequest(`/matching/${id}`, { auth: true })
+  return toHistoryRecord(row)
 }

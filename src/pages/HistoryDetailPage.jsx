@@ -1,16 +1,30 @@
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, FileDown } from 'lucide-react'
 import { useAnalysisDetail } from '../hooks/useAnalysisHistory'
+import { useGenerateDocument } from '../hooks/useDocuments'
 import Card from '../components/ui/Card'
 import Spinner from '../components/ui/Spinner'
 import ErrorState from '../components/ui/ErrorState'
 import Badge from '../components/ui/Badge'
+import Button from '../components/ui/Button'
+import { useToast } from '../components/ui/Toast'
 import ScoreGauge from '../components/charts/ScoreGauge'
 import ScoreBreakdownBars from '../components/charts/ScoreBreakdownBars'
 
 export default function HistoryDetailPage() {
   const { id } = useParams()
   const { data, isLoading, isError, error, refetch } = useAnalysisDetail(id)
+  const generateDocumentMutation = useGenerateDocument()
+  const { showToast } = useToast()
+
+  async function handleDownloadReport() {
+    try {
+      await generateDocumentMutation.mutateAsync({ analysisId: data.id })
+      showToast('PDF report generated and downloaded.', { tone: 'success' })
+    } catch (downloadError) {
+      showToast(downloadError.message, { tone: 'error' })
+    }
+  }
 
   if (isLoading) {
     return (
@@ -36,11 +50,21 @@ export default function HistoryDetailPage() {
         <ArrowLeft size={16} aria-hidden="true" /> Back to history
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold text-text-h">{data.jobTitle}</h1>
-        <p className="mt-1 text-sm text-text">
-          {data.resumeFilename} · {new Intl.DateTimeFormat(undefined, { dateStyle: 'long', timeStyle: 'short' }).format(new Date(data.analyzedAt))}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-text-h">{data.jobTitle}</h1>
+          <p className="mt-1 text-sm text-text">
+            {data.resumeFilename} · {new Intl.DateTimeFormat(undefined, { dateStyle: 'long', timeStyle: 'short' }).format(new Date(data.analyzedAt))}
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={handleDownloadReport}
+          isLoading={generateDocumentMutation.isPending}
+        >
+          <FileDown size={16} aria-hidden="true" />
+          Download PDF report
+        </Button>
       </div>
 
       <Card className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">

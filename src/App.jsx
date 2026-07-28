@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
+import PublicShell from './components/layout/PublicShell'
 import AppShell from './components/layout/AppShell'
 import AdminNav from './components/layout/AdminNav'
 import ProtectedRoute from './auth/ProtectedRoute'
@@ -15,6 +16,12 @@ import JobDescriptionPage from './pages/jobDescription/JobDescriptionPage'
 import DashboardPage from './pages/DashboardPage'
 import HistoryPage from './pages/HistoryPage'
 import HistoryDetailPage from './pages/HistoryDetailPage'
+import DocumentsPage from './pages/DocumentsPage'
+import SkillAssessmentPage from './pages/SkillAssessmentPage'
+import InterviewPracticePage from './pages/InterviewPracticePage'
+import LearningRoadmapPage from './pages/LearningRoadmapPage'
+import ResumeBuilderPage from './pages/ResumeBuilderPage'
+import VersionHistoryPage from './pages/VersionHistoryPage'
 import AdminUsersPage from './pages/admin/AdminUsersPage'
 import AdminReportsPage from './pages/admin/AdminReportsPage'
 import AdminAnalyticsPage from './pages/admin/AdminAnalyticsPage'
@@ -25,8 +32,7 @@ import ForbiddenPage from './pages/ForbiddenPage'
 export default function App() {
   return (
     <Routes>
-      <Route element={<AppShell />}>
-        {/* Public */}
+      <Route element={<PublicShell />}>
         <Route path="/" element={<WelcomePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
@@ -34,7 +40,10 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/job-description/new" element={<JobDescriptionPage />} />
         <Route path="/403" element={<ForbiddenPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
 
+      <Route element={<AppShell />}>
         {/* Authenticated */}
         <Route element={<ProtectedRoute />}>
           <Route path="/profile" element={<ProfilePage />} />
@@ -42,6 +51,12 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/history/:id" element={<HistoryDetailPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/skill-assessment" element={<SkillAssessmentPage />} />
+          <Route path="/interview-practice" element={<InterviewPracticePage />} />
+          <Route path="/roadmap" element={<LearningRoadmapPage />} />
+          <Route path="/resume-builder" element={<ResumeBuilderPage />} />
+          <Route path="/resume/versions" element={<VersionHistoryPage />} />
         </Route>
 
         {/* Admin */}
@@ -53,8 +68,6 @@ export default function App() {
             <Route path="/admin/settings" element={<AdminSettingsPage />} />
           </Route>
         </Route>
-
-        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   )

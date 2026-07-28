@@ -48,3 +48,17 @@ export function analyzeMatch({ file, jobDescription, githubUsername }) {
     body: toFormData({ file, job_description: jobDescription, github_username: githubUsername || undefined }),
   })
 }
+
+/**
+ * Recomputes the match between an already-saved resume and job description and
+ * persists it — this is what powers Skill Assessment, Interview Practice,
+ * Learning Roadmap, Version History, and Admin Analytics with real data.
+ * @param {{resumeId: number, jobDescriptionId: number}} params
+ */
+export function saveAnalysis({ resumeId, jobDescriptionId }) {
+  return apiRequest('/matching/save', {
+    method: 'POST',
+    auth: true,
+    body: { resume_id: resumeId, job_description_id: jobDescriptionId },
+  })
+}

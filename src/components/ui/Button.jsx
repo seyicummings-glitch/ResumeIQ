@@ -18,7 +18,7 @@ const SIZE_CLASSES = {
 /** Shared visual classes so a react-router <Link> can look exactly like a Button when a nav action needs to be a real link, not a <button onClick={navigate}>. */
 export function buttonClasses({ variant = 'primary', size = 'md', className } = {}) {
   return clsx(
-    'inline-flex items-center justify-center rounded-lg font-medium transition-colors cursor-pointer disabled:cursor-not-allowed',
+    'inline-flex items-center justify-center rounded-md font-medium transition-colors cursor-pointer disabled:cursor-not-allowed',
     VARIANT_CLASSES[variant],
     SIZE_CLASSES[size],
     className

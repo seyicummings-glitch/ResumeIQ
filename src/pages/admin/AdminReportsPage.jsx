@@ -32,11 +32,6 @@ export default function AdminReportsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="rounded-lg bg-warning-bg px-3 py-2 text-xs text-warning">
-        Demo data: the backend has no reports/moderation concept yet, so status changes here are saved on this
-        device only.
-      </p>
-
       {data.length === 0 ? (
         <EmptyState icon={Flag} title="No reports" description="Nothing has been flagged for review." />
       ) : (

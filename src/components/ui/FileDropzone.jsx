@@ -54,7 +54,7 @@ export default function FileDropzone({ accept, maxSizeMb = 10, file, onFileSelec
           handleFiles(event.dataTransfer.files)
         }}
         className={clsx(
-          'relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 text-center transition-colors',
+          'relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 text-center transition-colors',
           isDragging ? 'border-accent bg-accent/5' : 'border-border',
           displayError && 'border-danger'
         )}

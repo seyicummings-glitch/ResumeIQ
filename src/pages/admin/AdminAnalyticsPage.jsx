@@ -29,10 +29,6 @@ export default function AdminAnalyticsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="rounded-lg bg-warning-bg px-3 py-2 text-xs text-warning">
-        Demo data: shown for illustration until the backend exposes real analytics endpoints.
-      </p>
-
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {Object.entries(STAT_LABELS).map(([key, label]) => (
           <Card key={key}>

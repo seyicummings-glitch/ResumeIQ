@@ -14,7 +14,7 @@ const schema = z
   .object({
     fullName: z.string().optional(),
     email: z.string().min(1, 'Email is required').email('Enter a valid email address'),
-    password: z.string().min(8, 'Password must be at least 8 characters'),
+    password: z.string().min(8, 'Password must be 8 characters').max(8, 'Password must be 8 characters'),
     confirmPassword: z.string().min(1, 'Please confirm your password'),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -77,7 +77,8 @@ export default function RegisterPage() {
             type="password"
             autoComplete="new-password"
             required
-            hint="At least 8 characters"
+            maxLength={8}
+            hint="Must be 8 characters"
             error={errors.password?.message}
             {...register('password')}
           />
