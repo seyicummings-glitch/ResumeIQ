@@ -29,6 +29,15 @@ _RETRY_OPTIONS = genai_types.HttpRetryOptions(attempts=2)
 def _client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(retry_options=_RETRY_OPTIONS))
 
+
+def _gemini_api_keys() -> list[str]:
+    """A second Gemini key (GEMINI_API_KEY_2, e.g. from a different Google
+    account) is optional extra daily quota tried before falling through to
+    Groq — most installs will only have the first key set, in which case this
+    behaves exactly as if there were only ever one."""
+    return [k for k in [os.getenv("GEMINI_API_KEY"), os.getenv("GEMINI_API_KEY_2")] if k]
+
+
 FEEDBACK_SCHEMA = {
     "type": "object",
     "properties": {
@@ -144,36 +153,41 @@ def generate_interview_feedback(
     if not ai_enabled:
         return _fallback_feedback(transcript, missing_skills, "AI interview feedback has been disabled by the administrator.")
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         return _fallback_feedback(transcript, missing_skills, "AI interview feedback is not configured (no API key set).")
 
-    try:
-        client = _client(api_key)
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=_build_prompt(transcript, resume_text, jd_title, jd_content, missing_skills),
-            config=genai_types.GenerateContentConfig(
-                # 1500 wasn't enough headroom once the model's internal "thinking"
-                # tokens are counted against the same budget — raised the same way
-                # the other AI services in this app were fixed.
-                max_output_tokens=4000,
-                response_mime_type="application/json",
-                response_json_schema=FEEDBACK_SCHEMA,
-                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-            ),
-        )
-        result = json.loads(response.text)
-        result["source"] = "ai"
-        logger.info("interview_feedback.generate_interview_feedback served by gemini")
-        return result
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_feedback(transcript, resume_text, jd_title, jd_content, missing_skills)
-            if groq_result is not None:
-                return groq_result
-        return _fallback_feedback(transcript, missing_skills, "AI feedback is temporarily rate-limited or returned an error.")
-    except genai_errors.ServerError:
-        return _fallback_feedback(transcript, missing_skills, "Could not reach the AI service for feedback.")
-    except Exception:
-        return _fallback_feedback(transcript, missing_skills, "AI interview feedback is temporarily unavailable.")
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=_build_prompt(transcript, resume_text, jd_title, jd_content, missing_skills),
+                config=genai_types.GenerateContentConfig(
+                    # 1500 wasn't enough headroom once the model's internal "thinking"
+                    # tokens are counted against the same budget — raised the same way
+                    # the other AI services in this app were fixed.
+                    max_output_tokens=4000,
+                    response_mime_type="application/json",
+                    response_json_schema=FEEDBACK_SCHEMA,
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                ),
+            )
+            result = json.loads(response.text)
+            result["source"] = "ai"
+            logger.info("interview_feedback.generate_interview_feedback served by gemini")
+            return result
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                continue  # try the next configured Gemini key, if any
+            return _fallback_feedback(transcript, missing_skills, "AI feedback is temporarily rate-limited or returned an error.")
+        except genai_errors.ServerError:
+            return _fallback_feedback(transcript, missing_skills, "Could not reach the AI service for feedback.")
+        except Exception:
+            return _fallback_feedback(transcript, missing_skills, "AI interview feedback is temporarily unavailable.")
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    groq_result = _try_groq_feedback(transcript, resume_text, jd_title, jd_content, missing_skills)
+    if groq_result is not None:
+        return groq_result
+    return _fallback_feedback(transcript, missing_skills, "AI feedback is temporarily rate-limited or returned an error.")

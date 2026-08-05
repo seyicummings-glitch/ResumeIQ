@@ -6,6 +6,7 @@ from app.services.ai_interviewer import get_interviewer_reply
 
 def test_no_api_key_starts_with_first_fallback_question(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = get_interviewer_reply(
         resume_text="Built APIs in Python for 5 years.",
         jd_content="Looking for a backend engineer with Docker and Kubernetes experience.",
@@ -22,6 +23,7 @@ def test_no_api_key_starts_with_first_fallback_question(monkeypatch):
 
 def test_no_api_key_advances_through_questions(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     conversation = [
         {"role": "interviewer", "content": "first question"},
         {"role": "candidate", "content": "my answer"},
@@ -44,6 +46,7 @@ def test_no_api_key_no_context_still_falls_back_to_universal_questions(monkeypat
     returns the universal behavioral/system-design/role questions, so the
     fallback interview can still proceed rather than dead-ending."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = get_interviewer_reply(
         resume_text="",
         jd_content="",
@@ -319,3 +322,72 @@ def test_gemini_server_error_never_calls_groq(mock_gemini_client_cls, mock_groq_
 
     assert result["source"] == "fallback"
     mock_groq_client_fn.assert_not_called()
+
+
+def _two_key_client_factory(key1_client, key2_client):
+    def factory(api_key, **kwargs):
+        return key1_client if api_key == "key-1" else key2_client
+    return factory
+
+
+@patch("app.services.ai_interviewer.genai.Client")
+def test_second_gemini_key_used_when_first_hits_quota(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_error()
+    key2_client = Mock()
+    key2_response = Mock()
+    key2_response.text = json.dumps({"feedback": "", "question": "From the second key."})
+    key2_client.models.generate_content.return_value = key2_response
+    mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    result = get_interviewer_reply(
+        resume_text="resume text",
+        jd_content="jd text",
+        jd_title="Backend Engineer",
+        missing_skills=["docker"],
+        resume_skills=["python"],
+        conversation=[],
+    )
+
+    assert result["source"] == "ai"
+    assert result["question"] == "From the second key."
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+
+
+@patch("app.services.ai_interviewer.groq_client")
+@patch("app.services.ai_interviewer.genai.Client")
+def test_both_gemini_keys_exhausted_falls_back_to_groq(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_error()
+    key2_client = Mock()
+    key2_client.models.generate_content.side_effect = _gemini_quota_error()
+    mock_gemini_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    mock_groq_client = Mock()
+    mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
+        "feedback": "", "question": "From Groq.",
+    })
+    mock_groq_client_fn.return_value = mock_groq_client
+
+    result = get_interviewer_reply(
+        resume_text="resume text",
+        jd_content="jd text",
+        jd_title="Backend Engineer",
+        missing_skills=["docker"],
+        resume_skills=["python"],
+        conversation=[],
+    )
+
+    assert result["source"] == "ai"
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+    mock_groq_client.chat.completions.create.assert_called_once()

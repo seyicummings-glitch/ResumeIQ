@@ -22,6 +22,14 @@ def _client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(retry_options=_RETRY_OPTIONS))
 
 
+def _gemini_api_keys() -> list[str]:
+    """A second Gemini key (GEMINI_API_KEY_2, e.g. from a different Google
+    account) is optional extra daily quota tried before falling through to
+    Groq — most installs will only have the first key set, in which case this
+    behaves exactly as if there were only ever one."""
+    return [k for k in [os.getenv("GEMINI_API_KEY"), os.getenv("GEMINI_API_KEY_2")] if k]
+
+
 # --- Groq fallback -----------------------------------------------------------
 # Automatic second provider for when Gemini's quota/rate-limit is hit (429).
 # Uses Groq's OpenAI-compatible endpoint via the `openai` SDK (see
@@ -215,46 +223,52 @@ def generate_enhanced_resume(resume_text: str, missing_skills: list[str], fallba
     if not ai_enabled:
         return _fallback_response("AI resume building has been disabled by the administrator.", fallback_data)
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         return _fallback_response("AI resume building is not configured (no API key set).", fallback_data)
 
-    try:
-        client = _client(api_key)
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=_build_prompt(resume_text, missing_skills),
-            config=genai_types.GenerateContentConfig(
-                # 2048 wasn't enough headroom once the model's internal "thinking"
-                # tokens are counted against the same budget — this raises it the
-                # same way the skill-assessment and interviewer services were fixed.
-                max_output_tokens=6000,
-                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-                response_mime_type="application/json",
-                response_json_schema=BUILDER_SCHEMA,
-            ),
+    last_quota_error = None
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=_build_prompt(resume_text, missing_skills),
+                config=genai_types.GenerateContentConfig(
+                    # 2048 wasn't enough headroom once the model's internal "thinking"
+                    # tokens are counted against the same budget — this raises it the
+                    # same way the skill-assessment and interviewer services were fixed.
+                    max_output_tokens=6000,
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                    response_mime_type="application/json",
+                    response_json_schema=BUILDER_SCHEMA,
+                ),
+            )
+            result = json.loads(response.text)
+            result["source"] = "ai"
+            logger.info("resume_builder.generate_enhanced_resume served by gemini")
+            return result
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                last_quota_error = e
+                continue  # try the next configured Gemini key, if any
+            return _fallback_response("The AI service returned an error. Showing your original content instead.", fallback_data)
+        except genai_errors.ServerError:
+            return _fallback_response("Could not reach the AI service. Showing your original content instead.", fallback_data)
+        except Exception:
+            return _fallback_response("AI resume building is temporarily unavailable. Showing your original content instead.", fallback_data)
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    groq_result = _try_groq_generate(resume_text, missing_skills)
+    if groq_result is not None:
+        return groq_result
+    if last_quota_error is not None and _is_daily_quota_error(last_quota_error):
+        return _fallback_response(
+            "AI resume building has hit its daily usage limit — it'll be back once that resets, or "
+            "once an admin upgrades the AI plan. Showing your original content instead.",
+            fallback_data,
         )
-        result = json.loads(response.text)
-        result["source"] = "ai"
-        logger.info("resume_builder.generate_enhanced_resume served by gemini")
-        return result
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_generate(resume_text, missing_skills)
-            if groq_result is not None:
-                return groq_result
-            if _is_daily_quota_error(e):
-                return _fallback_response(
-                    "AI resume building has hit its daily usage limit — it'll be back once that resets, or "
-                    "once an admin upgrades the AI plan. Showing your original content instead.",
-                    fallback_data,
-                )
-            return _fallback_response("AI resume building is temporarily rate-limited. Showing your original content instead.", fallback_data)
-        return _fallback_response("The AI service returned an error. Showing your original content instead.", fallback_data)
-    except genai_errors.ServerError:
-        return _fallback_response("Could not reach the AI service. Showing your original content instead.", fallback_data)
-    except Exception:
-        return _fallback_response("AI resume building is temporarily unavailable. Showing your original content instead.", fallback_data)
+    return _fallback_response("AI resume building is temporarily rate-limited. Showing your original content instead.", fallback_data)
 
 
 CHAT_SCHEMA = {
@@ -356,64 +370,72 @@ def chat_about_resume(
         logger.info("resume_builder.chat_about_resume served by fallback (AI disabled by admin)")
         return unavailable_reply
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         logger.info("resume_builder.chat_about_resume served by fallback (no GEMINI_API_KEY configured)")
         return unavailable_reply
 
-    try:
-        client = _client(api_key)
-        contents = [
-            {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
-            for m in conversation
-        ]
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=contents,
-            config=genai_types.GenerateContentConfig(
-                max_output_tokens=6000,
-                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-                system_instruction=_build_chat_system_prompt(
-                    resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
+    last_quota_error = None
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
+            contents = [
+                {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+                for m in conversation
+            ]
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=contents,
+                config=genai_types.GenerateContentConfig(
+                    max_output_tokens=6000,
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                    system_instruction=_build_chat_system_prompt(
+                        resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
+                    ),
+                    response_mime_type="application/json",
+                    response_json_schema=CHAT_SCHEMA,
                 ),
-                response_mime_type="application/json",
-                response_json_schema=CHAT_SCHEMA,
-            ),
-        )
-        result = json.loads(response.text)
-        result["source"] = "ai"
-        logger.info("resume_builder.chat_about_resume served by gemini")
-        return result
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_chat(
-                conversation, resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
             )
-            if groq_result is not None:
-                return groq_result
+            result = json.loads(response.text)
+            result["source"] = "ai"
+            logger.info("resume_builder.chat_about_resume served by gemini")
+            return result
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                last_quota_error = e
+                continue  # try the next configured Gemini key, if any
 
-        error_reply = dict(unavailable_reply)
-        if e.code == 429:
-            error_reply["reply"] = (
-                "The AI assistant has hit its daily usage limit — it'll be back once that resets, or once an "
-                "admin upgrades the AI plan. Your draft wasn't changed; you can still edit it directly."
-                if _is_daily_quota_error(e)
-                else "You're sending messages a bit fast — give it a moment and try again."
-            )
-        else:
+            error_reply = dict(unavailable_reply)
             error_reply["reply"] = "The AI service returned an error — your draft wasn't changed. Try rephrasing your request."
-        logger.info("resume_builder.chat_about_resume served by fallback (gemini ClientError, code=%s)", e.code)
-        return error_reply
-    except genai_errors.ServerError:
-        error_reply = dict(unavailable_reply)
-        error_reply["reply"] = "Could not reach the AI service — your draft wasn't changed. Try again in a moment."
-        logger.info("resume_builder.chat_about_resume served by fallback (gemini ServerError)")
-        return error_reply
-    except Exception:
-        error_reply = dict(unavailable_reply)
-        error_reply["reply"] = "Something went wrong generating a reply — your draft wasn't changed."
-        logger.info("resume_builder.chat_about_resume served by fallback (unexpected error)")
-        return error_reply
+            logger.info("resume_builder.chat_about_resume served by fallback (gemini ClientError, code=%s)", e.code)
+            return error_reply
+        except genai_errors.ServerError:
+            error_reply = dict(unavailable_reply)
+            error_reply["reply"] = "Could not reach the AI service — your draft wasn't changed. Try again in a moment."
+            logger.info("resume_builder.chat_about_resume served by fallback (gemini ServerError)")
+            return error_reply
+        except Exception:
+            error_reply = dict(unavailable_reply)
+            error_reply["reply"] = "Something went wrong generating a reply — your draft wasn't changed."
+            logger.info("resume_builder.chat_about_resume served by fallback (unexpected error)")
+            return error_reply
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    groq_result = _try_groq_chat(
+        conversation, resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
+    )
+    if groq_result is not None:
+        return groq_result
+
+    error_reply = dict(unavailable_reply)
+    error_reply["reply"] = (
+        "The AI assistant has hit its daily usage limit — it'll be back once that resets, or once an "
+        "admin upgrades the AI plan. Your draft wasn't changed; you can still edit it directly."
+        if last_quota_error is not None and _is_daily_quota_error(last_quota_error)
+        else "You're sending messages a bit fast — give it a moment and try again."
+    )
+    logger.info("resume_builder.chat_about_resume served by fallback (all gemini keys quota/rate-limited)")
+    return error_reply
 
 
 def _fallback_response(message: str, fallback_data: dict) -> dict:

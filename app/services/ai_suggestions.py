@@ -21,6 +21,15 @@ _RETRY_OPTIONS = genai_types.HttpRetryOptions(attempts=2)
 def _client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(retry_options=_RETRY_OPTIONS))
 
+
+def _gemini_api_keys() -> list[str]:
+    """A second Gemini key (GEMINI_API_KEY_2, e.g. from a different Google
+    account) is optional extra daily quota tried before falling through to
+    Groq — most installs will only have the first key set, in which case this
+    behaves exactly as if there were only ever one."""
+    return [k for k in [os.getenv("GEMINI_API_KEY"), os.getenv("GEMINI_API_KEY_2")] if k]
+
+
 SUGGESTION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -98,40 +107,44 @@ def generate_resume_suggestions(resume_text: str, job_description: str | None, f
     if not ai_enabled:
         return _fallback_response("AI suggestions have been disabled by the administrator.", fallback_data)
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         return _fallback_response("AI suggestions are not configured (no API key set).", fallback_data)
 
-    try:
-        client = _client(api_key)
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=_build_prompt(resume_text, job_description),
-            config=genai_types.GenerateContentConfig(
-                # 1024 wasn't enough headroom once the model's internal "thinking"
-                # tokens are counted against the same budget — raised the same way
-                # the other AI services in this app were fixed.
-                max_output_tokens=4000,
-                response_mime_type="application/json",
-                response_json_schema=SUGGESTION_SCHEMA,
-                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-            ),
-        )
-        result = json.loads(response.text)
-        result["source"] = "ai"
-        logger.info("ai_suggestions.generate_resume_suggestions served by gemini")
-        return result
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_suggestions(resume_text, job_description)
-            if groq_result is not None:
-                return groq_result
-            return _fallback_response("AI suggestions are temporarily rate-limited. Showing rule-based analysis instead.", fallback_data)
-        return _fallback_response("The AI service returned an error. Showing rule-based analysis instead.", fallback_data)
-    except genai_errors.ServerError:
-        return _fallback_response("Could not reach the AI service. Showing rule-based analysis instead.", fallback_data)
-    except Exception:
-        return _fallback_response("AI suggestions are temporarily unavailable. Showing rule-based analysis instead.", fallback_data)
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=_build_prompt(resume_text, job_description),
+                config=genai_types.GenerateContentConfig(
+                    # 1024 wasn't enough headroom once the model's internal "thinking"
+                    # tokens are counted against the same budget — raised the same way
+                    # the other AI services in this app were fixed.
+                    max_output_tokens=4000,
+                    response_mime_type="application/json",
+                    response_json_schema=SUGGESTION_SCHEMA,
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                ),
+            )
+            result = json.loads(response.text)
+            result["source"] = "ai"
+            logger.info("ai_suggestions.generate_resume_suggestions served by gemini")
+            return result
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                continue  # try the next configured Gemini key, if any
+            return _fallback_response("The AI service returned an error. Showing rule-based analysis instead.", fallback_data)
+        except genai_errors.ServerError:
+            return _fallback_response("Could not reach the AI service. Showing rule-based analysis instead.", fallback_data)
+        except Exception:
+            return _fallback_response("AI suggestions are temporarily unavailable. Showing rule-based analysis instead.", fallback_data)
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    groq_result = _try_groq_suggestions(resume_text, job_description)
+    if groq_result is not None:
+        return groq_result
+    return _fallback_response("AI suggestions are temporarily rate-limited. Showing rule-based analysis instead.", fallback_data)
 
 
 def _fallback_response(message: str, fallback_data: dict) -> dict:

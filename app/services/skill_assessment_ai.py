@@ -49,6 +49,14 @@ def _client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(retry_options=_RETRY_OPTIONS))
 
 
+def _gemini_api_keys() -> list[str]:
+    """A second Gemini key (GEMINI_API_KEY_2, e.g. from a different Google
+    account) is optional extra daily quota tried before falling through to
+    Groq — most installs will only have the first key set, in which case this
+    behaves exactly as if there were only ever one."""
+    return [k for k in [os.getenv("GEMINI_API_KEY"), os.getenv("GEMINI_API_KEY_2")] if k]
+
+
 DEFAULT_TOTAL_COUNT = 15
 MIN_TOTAL_COUNT = 5
 MAX_TOTAL_COUNT = 25
@@ -288,50 +296,52 @@ def generate_assessment_questions(
     if not ai_enabled:
         return None
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         return None
 
     counts = distribute_counts(total_count)
 
-    try:
-        client = _client(api_key)
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=_build_generation_prompt(
-                target_role, industry, experience_level, resume_text, resume_skills,
-                missing_skills, jd_content, recent_questions, counts,
-            ),
-            config=genai_types.GenerateContentConfig(
-                max_output_tokens=4000 + sum(counts.values()) * 250,
-                temperature=1.15,
-                response_mime_type="application/json",
-                response_json_schema=_build_generation_schema(counts),
-                # This structured-JSON generation task doesn't need heavy internal
-                # reasoning — "LOW" cut real-world latency roughly in half (measured
-                # ~30s -> ~14s for a 15-question request) versus the model's default
-                # thinking level, without any loss of output quality/validity.
-                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-            ),
-        )
-        result = json.loads(response.text)
-        if not _validate_generation_result(result, counts):
-            return None
-        logger.info("skill_assessment_ai.generate_assessment_questions served by gemini")
-        return result
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_generate(
-                target_role, industry, experience_level, resume_text, resume_skills,
-                missing_skills, jd_content, recent_questions, counts,
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=_build_generation_prompt(
+                    target_role, industry, experience_level, resume_text, resume_skills,
+                    missing_skills, jd_content, recent_questions, counts,
+                ),
+                config=genai_types.GenerateContentConfig(
+                    max_output_tokens=4000 + sum(counts.values()) * 250,
+                    temperature=1.15,
+                    response_mime_type="application/json",
+                    response_json_schema=_build_generation_schema(counts),
+                    # This structured-JSON generation task doesn't need heavy internal
+                    # reasoning — "LOW" cut real-world latency roughly in half (measured
+                    # ~30s -> ~14s for a 15-question request) versus the model's default
+                    # thinking level, without any loss of output quality/validity.
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                ),
             )
-            if groq_result is not None:
-                return groq_result
-        logger.info("skill_assessment_ai.generate_assessment_questions served by fallback (gemini ClientError, code=%s)", e.code)
-        return None
-    except Exception:
-        logger.info("skill_assessment_ai.generate_assessment_questions served by fallback (unexpected gemini error)")
-        return None
+            result = json.loads(response.text)
+            if not _validate_generation_result(result, counts):
+                return None
+            logger.info("skill_assessment_ai.generate_assessment_questions served by gemini")
+            return result
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                continue  # try the next configured Gemini key, if any
+            logger.info("skill_assessment_ai.generate_assessment_questions served by fallback (gemini ClientError, code=%s)", e.code)
+            return None
+        except Exception:
+            logger.info("skill_assessment_ai.generate_assessment_questions served by fallback (unexpected gemini error)")
+            return None
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    return _try_groq_generate(
+        target_role, industry, experience_level, resume_text, resume_skills,
+        missing_skills, jd_content, recent_questions, counts,
+    )
 
 
 GRADING_SCHEMA = {
@@ -444,35 +454,37 @@ def grade_assessment_answers(items: list[dict], ai_enabled: bool = True) -> list
     if not ai_enabled or not items:
         return None
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         return None
 
-    try:
-        client = _client(api_key)
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=_build_grading_prompt(items),
-            config=genai_types.GenerateContentConfig(
-                max_output_tokens=4000 + len(items) * 300,
-                response_mime_type="application/json",
-                response_json_schema=GRADING_SCHEMA,
-                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-            ),
-        )
-        parsed = json.loads(response.text)
-        results = parsed.get("results", [])
-        if len(results) != len(items):
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=_build_grading_prompt(items),
+                config=genai_types.GenerateContentConfig(
+                    max_output_tokens=4000 + len(items) * 300,
+                    response_mime_type="application/json",
+                    response_json_schema=GRADING_SCHEMA,
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                ),
+            )
+            parsed = json.loads(response.text)
+            results = parsed.get("results", [])
+            if len(results) != len(items):
+                return None
+            logger.info("skill_assessment_ai.grade_assessment_answers served by gemini")
+            return results
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                continue  # try the next configured Gemini key, if any
+            logger.info("skill_assessment_ai.grade_assessment_answers served by fallback (gemini ClientError, code=%s)", e.code)
             return None
-        logger.info("skill_assessment_ai.grade_assessment_answers served by gemini")
-        return results
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_grade(items)
-            if groq_result is not None:
-                return groq_result
-        logger.info("skill_assessment_ai.grade_assessment_answers served by fallback (gemini ClientError, code=%s)", e.code)
-        return None
-    except Exception:
-        logger.info("skill_assessment_ai.grade_assessment_answers served by fallback (unexpected gemini error)")
-        return None
+        except Exception:
+            logger.info("skill_assessment_ai.grade_assessment_answers served by fallback (unexpected gemini error)")
+            return None
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    return _try_groq_grade(items)

@@ -25,6 +25,12 @@ def _mock_groq_response(payload: dict) -> Mock:
     return response
 
 
+def _two_key_client_factory(key1_client, key2_client):
+    def factory(api_key, **kwargs):
+        return key1_client if api_key == "key-1" else key2_client
+    return factory
+
+
 def _hard_question(i, category="Python"):
     return {"category": category, "difficulty": "advanced", "question": f"Question {i}?", "expected_answer_points": f"Point {i}"}
 
@@ -67,6 +73,7 @@ def test_distribute_counts_clamps_out_of_range():
 
 def test_generate_no_api_key_returns_none(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = generate_assessment_questions("Backend Engineer", "Tech", "mid", "resume", ["Python"], ["Docker"], "jd", [])
     assert result is None
 
@@ -178,6 +185,7 @@ def test_recent_questions_included_in_avoid_list(mock_client_cls, monkeypatch):
 
 def test_grade_no_api_key_returns_none(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = grade_assessment_answers([{"id": 1, "type": "technical", "question": "q", "expected_answer_points": "p", "answer": "a"}])
     assert result is None
 
@@ -347,3 +355,71 @@ def test_grade_quota_error_without_groq_key_still_returns_none(mock_gemini_clien
 
     assert result is None
     mock_groq_client_fn.assert_not_called()
+
+
+# --- Second Gemini key cascade ---------------------------------------------
+
+
+@patch("app.services.skill_assessment_ai.genai.Client")
+def test_generate_second_gemini_key_used_when_first_hits_quota(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    counts = distribute_counts(DEFAULT_TOTAL_COUNT)
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_error()
+    key2_client = Mock()
+    key2_response = Mock()
+    key2_response.text = json.dumps(_valid_payload(counts))
+    key2_client.models.generate_content.return_value = key2_response
+
+    mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    result = generate_assessment_questions("Backend Engineer", "Tech", "mid", "resume", ["Python"], ["Docker"], "jd", [])
+
+    assert result is not None
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+
+
+@patch("app.services.skill_assessment_ai.groq_client")
+@patch("app.services.skill_assessment_ai.genai.Client")
+def test_generate_both_gemini_keys_exhausted_falls_back_to_groq(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_error()
+    key2_client = Mock()
+    key2_client.models.generate_content.side_effect = _gemini_quota_error()
+    mock_gemini_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    counts = distribute_counts(DEFAULT_TOTAL_COUNT)
+    mock_groq_client = Mock()
+    mock_groq_client.chat.completions.create.return_value = _mock_groq_response(_valid_payload(counts))
+    mock_groq_client_fn.return_value = mock_groq_client
+
+    result = generate_assessment_questions("Backend Engineer", "Tech", "mid", "resume", ["Python"], ["Docker"], "jd", [])
+
+    assert result is not None
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+    mock_groq_client.chat.completions.create.assert_called_once()
+
+
+@patch("app.services.skill_assessment_ai.genai.Client")
+def test_generate_first_key_non_quota_error_never_tries_second_key(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = RuntimeError("boom")
+    key2_client = Mock()
+    mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    result = generate_assessment_questions("Backend Engineer", "Tech", "mid", "resume", ["Python"], ["Docker"], "jd", [])
+
+    assert result is None
+    key2_client.models.generate_content.assert_not_called()

@@ -40,6 +40,15 @@ _RETRY_OPTIONS = genai_types.HttpRetryOptions(attempts=2)
 def _client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(retry_options=_RETRY_OPTIONS))
 
+
+def _gemini_api_keys() -> list[str]:
+    """A second Gemini key (GEMINI_API_KEY_2, e.g. from a different Google
+    account) is optional extra daily quota tried before falling through to
+    Groq — most installs will only have the first key set, in which case this
+    behaves exactly as if there were only ever one."""
+    return [k for k in [os.getenv("GEMINI_API_KEY"), os.getenv("GEMINI_API_KEY_2")] if k]
+
+
 JD_SCHEMA = {
     "type": "object",
     "properties": {
@@ -124,34 +133,36 @@ def parse_job_description_ai(text: str, ai_enabled: bool = True) -> dict | None:
     if not ai_enabled or not text or not text.strip():
         return None
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         return None
 
-    try:
-        client = _client(api_key)
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=_build_prompt(text),
-            config=genai_types.GenerateContentConfig(
-                max_output_tokens=4096,
-                response_mime_type="application/json",
-                response_json_schema=JD_SCHEMA,
-                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
-            ),
-        )
-        result = json.loads(response.text)
-        if not result.get("required_skills"):
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=_build_prompt(text),
+                config=genai_types.GenerateContentConfig(
+                    max_output_tokens=4096,
+                    response_mime_type="application/json",
+                    response_json_schema=JD_SCHEMA,
+                    thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+                ),
+            )
+            result = json.loads(response.text)
+            if not result.get("required_skills"):
+                return None
+            logger.info("job_description_ai.parse_job_description_ai served by gemini")
+            return result
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                continue  # try the next configured Gemini key, if any
+            logger.info("job_description_ai.parse_job_description_ai served by fallback (gemini ClientError, code=%s)", e.code)
             return None
-        logger.info("job_description_ai.parse_job_description_ai served by gemini")
-        return result
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_parse(text)
-            if groq_result is not None:
-                return groq_result
-        logger.info("job_description_ai.parse_job_description_ai served by fallback (gemini ClientError, code=%s)", e.code)
-        return None
-    except Exception:
-        logger.info("job_description_ai.parse_job_description_ai served by fallback (unexpected gemini error)")
-        return None
+        except Exception:
+            logger.info("job_description_ai.parse_job_description_ai served by fallback (unexpected gemini error)")
+            return None
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    return _try_groq_parse(text)

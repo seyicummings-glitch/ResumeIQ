@@ -20,6 +20,7 @@ def _mock_groq_response(payload: dict) -> Mock:
 
 def test_no_api_key_returns_fallback(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = generate_resume_suggestions("some resume text", None, {"ats_issues": ["No email address detected."]})
     assert result["source"] == "fallback"
     assert any(s["category"] == "ATS Compatibility" for s in result["suggestions"])
@@ -144,3 +145,59 @@ def test_server_error_returns_fallback(mock_client_cls, monkeypatch):
     result = generate_resume_suggestions("resume text", None, {"ats_issues": []})
     assert result["source"] == "fallback"
     assert "Could not reach the AI service" in result["overall_assessment"]
+
+
+def _two_key_client_factory(key1_client, key2_client):
+    def factory(api_key, **kwargs):
+        return key1_client if api_key == "key-1" else key2_client
+    return factory
+
+
+@patch("app.services.ai_suggestions.genai.Client")
+def test_second_gemini_key_used_when_first_hits_quota(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_error()
+    key2_client = Mock()
+    key2_client.models.generate_content.return_value = Mock(text=json.dumps({
+        "overall_assessment": "From the second key.",
+        "suggestions": [],
+    }))
+    mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    result = generate_resume_suggestions("resume text", None, {})
+
+    assert result["source"] == "ai"
+    assert result["overall_assessment"] == "From the second key."
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+
+
+@patch("app.services.ai_suggestions.groq_client")
+@patch("app.services.ai_suggestions.genai.Client")
+def test_both_gemini_keys_exhausted_falls_back_to_groq(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_error()
+    key2_client = Mock()
+    key2_client.models.generate_content.side_effect = _gemini_quota_error()
+    mock_gemini_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    mock_groq_client = Mock()
+    mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
+        "overall_assessment": "From Groq.", "suggestions": [],
+    })
+    mock_groq_client_fn.return_value = mock_groq_client
+
+    result = generate_resume_suggestions("resume text", None, {})
+
+    assert result["source"] == "ai"
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+    mock_groq_client.chat.completions.create.assert_called_once()

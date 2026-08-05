@@ -38,6 +38,15 @@ _RETRY_OPTIONS = genai_types.HttpRetryOptions(attempts=2)
 def _client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(retry_options=_RETRY_OPTIONS))
 
+
+def _gemini_api_keys() -> list[str]:
+    """A second Gemini key (GEMINI_API_KEY_2, e.g. from a different Google
+    account) is optional extra daily quota tried before falling through to
+    Groq — most installs will only have the first key set, in which case this
+    behaves exactly as if there were only ever one."""
+    return [k for k in [os.getenv("GEMINI_API_KEY"), os.getenv("GEMINI_API_KEY_2")] if k]
+
+
 TURN_SCHEMA = {
     "type": "object",
     "properties": {
@@ -210,47 +219,53 @@ def get_interviewer_reply(
     if not ai_enabled:
         return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    gemini_keys = _gemini_api_keys()
+    if not gemini_keys:
         return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
 
-    try:
-        client = _client(api_key)
+    for api_key in gemini_keys:
+        try:
+            client = _client(api_key)
 
-        contents = [
-            {"role": "model" if m["role"] == "interviewer" else "user", "parts": [{"text": m["content"]}]}
-            for m in conversation
-        ]
-        if not contents:
-            contents = [{"role": "user", "parts": [{"text": "Please begin the interview."}]}]
+            contents = [
+                {"role": "model" if m["role"] == "interviewer" else "user", "parts": [{"text": m["content"]}]}
+                for m in conversation
+            ]
+            if not contents:
+                contents = [{"role": "user", "parts": [{"text": "Please begin the interview."}]}]
 
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=contents,
-            config=genai_types.GenerateContentConfig(
-                max_output_tokens=4000,
-                system_instruction=_build_system_prompt(resume_text, jd_content, jd_title, missing_skills, preferred_language),
-                response_mime_type="application/json",
-                response_json_schema=TURN_SCHEMA,
-            ),
-        )
-        parsed = json.loads(response.text)
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=contents,
+                config=genai_types.GenerateContentConfig(
+                    max_output_tokens=4000,
+                    system_instruction=_build_system_prompt(resume_text, jd_content, jd_title, missing_skills, preferred_language),
+                    response_mime_type="application/json",
+                    response_json_schema=TURN_SCHEMA,
+                ),
+            )
+            parsed = json.loads(response.text)
 
-        answered_count = len([m for m in conversation if m.get("role") == "candidate"])
-        done = answered_count >= MAX_QUESTIONS
+            answered_count = len([m for m in conversation if m.get("role") == "candidate"])
+            done = answered_count >= MAX_QUESTIONS
 
-        logger.info("ai_interviewer.get_interviewer_reply served by gemini")
-        return {"feedback": parsed["feedback"], "question": parsed["question"], "source": "ai", "done": done}
-    except genai_errors.ClientError as e:
-        if e.code == 429:
-            groq_result = _try_groq_interviewer_reply(resume_text, jd_content, jd_title, missing_skills, conversation, preferred_language)
-            if groq_result is not None:
-                return groq_result
-        logger.info("ai_interviewer.get_interviewer_reply served by fallback (gemini ClientError, code=%s)", e.code)
-        return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
-    except genai_errors.ServerError:
-        logger.info("ai_interviewer.get_interviewer_reply served by fallback (gemini ServerError)")
-        return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
-    except Exception:
-        logger.info("ai_interviewer.get_interviewer_reply served by fallback (unexpected gemini error)")
-        return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
+            logger.info("ai_interviewer.get_interviewer_reply served by gemini")
+            return {"feedback": parsed["feedback"], "question": parsed["question"], "source": "ai", "done": done}
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                continue  # try the next configured Gemini key, if any
+            logger.info("ai_interviewer.get_interviewer_reply served by fallback (gemini ClientError, code=%s)", e.code)
+            return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
+        except genai_errors.ServerError:
+            logger.info("ai_interviewer.get_interviewer_reply served by fallback (gemini ServerError)")
+            return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
+        except Exception:
+            logger.info("ai_interviewer.get_interviewer_reply served by fallback (unexpected gemini error)")
+            return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)
+
+    # Every configured Gemini key hit a 429 — try Groq before giving up.
+    groq_result = _try_groq_interviewer_reply(resume_text, jd_content, jd_title, missing_skills, conversation, preferred_language)
+    if groq_result is not None:
+        return groq_result
+    logger.info("ai_interviewer.get_interviewer_reply served by fallback (all gemini keys quota/rate-limited)")
+    return _fallback_reply(conversation, missing_skills, resume_skills, jd_title)

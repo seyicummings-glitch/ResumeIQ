@@ -34,8 +34,18 @@ def _mock_groq_response(payload: dict) -> Mock:
     return response
 
 
+def _two_key_client_factory(key1_client, key2_client):
+    """genai.Client(api_key=..., http_options=...) is called positionally by
+    keyword in this codebase -- routes the mock to whichever client belongs to
+    the key actually passed in, so each key's mocked behavior stays distinct."""
+    def factory(api_key, **kwargs):
+        return key1_client if api_key == "key-1" else key2_client
+    return factory
+
+
 def test_no_api_key_returns_fallback(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = generate_enhanced_resume(
         "some resume text",
         ["Kubernetes"],
@@ -53,6 +63,7 @@ def test_no_api_key_returns_fallback(monkeypatch):
 
 def test_no_api_key_returns_fallback_with_empty_data(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = generate_enhanced_resume("some resume text", [], {})
     assert result["source"] == "fallback"
     assert result["summary"]
@@ -164,6 +175,7 @@ def test_chat_builds_from_scratch_with_no_resume_or_draft(mock_client_cls, monke
 
 def test_chat_no_api_key_returns_draft_unchanged(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
     result = chat_about_resume(
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
         resume_text="resume text",
@@ -377,3 +389,122 @@ def test_groq_also_failing_falls_back_normally(mock_gemini_client_cls, mock_groq
 
     assert result["source"] == "fallback"
     assert "daily usage limit" in result["overall_assessment"]
+
+
+# --- Second Gemini key cascade ---------------------------------------------
+
+
+@patch("app.services.resume_builder.genai.Client")
+def test_second_gemini_key_used_when_first_hits_quota_for_generate(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_exhausted_error()
+
+    key2_client = Mock()
+    key2_response = Mock()
+    key2_response.text = json.dumps({
+        "summary": "From the second key.",
+        "experience_bullets": ["Bullet."],
+        "skills_section": "Python",
+    })
+    key2_client.models.generate_content.return_value = key2_response
+
+    mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    result = generate_enhanced_resume("resume text", [], {})
+
+    assert result["source"] == "ai"
+    assert result["summary"] == "From the second key."
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+
+
+@patch("app.services.resume_builder.groq_client")
+@patch("app.services.resume_builder.genai.Client")
+def test_both_gemini_keys_quota_exhausted_falls_back_to_groq(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_exhausted_error()
+    key2_client = Mock()
+    key2_client.models.generate_content.side_effect = _gemini_quota_exhausted_error()
+    mock_gemini_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    mock_groq_client = Mock()
+    mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
+        "summary": "From Groq after both Gemini keys were exhausted.",
+        "experience_bullets": ["Bullet."],
+        "skills_section": "Python",
+    })
+    mock_groq_client_fn.return_value = mock_groq_client
+
+    result = generate_enhanced_resume("resume text", [], {})
+
+    assert result["source"] == "ai"
+    assert "Groq" in result["summary"]
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
+    mock_groq_client.chat.completions.create.assert_called_once()
+
+
+@patch("app.services.resume_builder.genai.Client")
+def test_first_key_non_quota_error_never_tries_second_key(mock_client_cls, monkeypatch):
+    """A real error (not a 429) on the first key must fail over to the
+    deterministic fallback immediately -- never cascade to the second key or
+    Groq, so a genuine bug can't hide behind extra providers."""
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = genai_errors.ClientError(
+        400, {"message": "bad request", "status": "INVALID_ARGUMENT"}, None
+    )
+    key2_client = Mock()
+
+    mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    result = generate_enhanced_resume("resume text", [], {})
+
+    assert result["source"] == "fallback"
+    key2_client.models.generate_content.assert_not_called()
+
+
+@patch("app.services.resume_builder.genai.Client")
+def test_second_gemini_key_used_when_first_hits_quota_for_chat(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-1")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "key-2")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    key1_client = Mock()
+    key1_client.models.generate_content.side_effect = _gemini_quota_exhausted_error()
+
+    key2_client = Mock()
+    key2_response = Mock()
+    key2_response.text = json.dumps({
+        "reply": "Done — from the second key.",
+        "summary": "Current summary.",
+        "experience_bullets": ["Bullet one."],
+        "skills_section": "Python, SQL",
+    })
+    key2_client.models.generate_content.return_value = key2_response
+
+    mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
+
+    result = chat_about_resume(
+        conversation=[{"role": "user", "content": "Remove the second bullet."}],
+        resume_text="resume text",
+        missing_skills=[],
+        current_summary="Current summary.",
+        current_experience_bullets=["Bullet one.", "Bullet two."],
+        current_skills_section="Python, SQL",
+    )
+
+    assert result["source"] == "ai"
+    assert "second key" in result["reply"]
+    key1_client.models.generate_content.assert_called_once()
+    key2_client.models.generate_content.assert_called_once()
