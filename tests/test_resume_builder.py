@@ -89,6 +89,9 @@ def test_successful_call_returns_ai_result(mock_client_cls, monkeypatch):
 @patch("app.services.resume_builder.genai.Client")
 def test_rate_limit_error_returns_fallback(mock_client_cls, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    # Must not depend on whatever GROQ_API_KEY happens to be in the real .env —
+    # this test is specifically about behavior when Groq isn't available.
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     mock_client = Mock()
     mock_client.models.generate_content.side_effect = genai_errors.ClientError(
@@ -222,6 +225,9 @@ def test_chat_successful_call_returns_updated_draft(mock_client_cls, monkeypatch
 @patch("app.services.resume_builder.genai.Client")
 def test_chat_error_leaves_draft_unchanged(mock_client_cls, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    # Must not depend on whatever GROQ_API_KEY happens to be in the real .env —
+    # this test is specifically about behavior when Groq isn't available.
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     mock_client = Mock()
     mock_client.models.generate_content.side_effect = genai_errors.ClientError(
@@ -245,9 +251,9 @@ def test_chat_error_leaves_draft_unchanged(mock_client_cls, monkeypatch):
 # --- Groq fallback -------------------------------------------------------
 
 
-@patch("app.services.resume_builder.OpenAI")
+@patch("app.services.resume_builder.groq_client")
 @patch("app.services.resume_builder.genai.Client")
-def test_gemini_quota_error_falls_back_to_groq_for_generate(mock_gemini_client_cls, mock_openai_cls, monkeypatch):
+def test_gemini_quota_error_falls_back_to_groq_for_generate(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
 
@@ -261,7 +267,7 @@ def test_gemini_quota_error_falls_back_to_groq_for_generate(mock_gemini_client_c
         "experience_bullets": ["Built scalable REST APIs serving high traffic."],
         "skills_section": "Languages: Python, SQL",
     })
-    mock_openai_cls.return_value = mock_groq_client
+    mock_groq_client_fn.return_value = mock_groq_client
 
     result = generate_enhanced_resume("resume text", ["Kubernetes"], {"original_skills": ["Python"]})
 
@@ -274,14 +280,12 @@ def test_gemini_quota_error_falls_back_to_groq_for_generate(mock_gemini_client_c
     assert call_kwargs["model"] == "llama-3.3-70b-versatile"
     assert call_kwargs["response_format"] == {"type": "json_object"}
 
-    mock_openai_cls.assert_called_once()
-    assert mock_openai_cls.call_args.kwargs["base_url"] == "https://api.groq.com/openai/v1"
-    assert mock_openai_cls.call_args.kwargs["api_key"] == "groq-test-key"
+    mock_groq_client_fn.assert_called_once_with("groq-test-key")
 
 
-@patch("app.services.resume_builder.OpenAI")
+@patch("app.services.resume_builder.groq_client")
 @patch("app.services.resume_builder.genai.Client")
-def test_gemini_quota_error_falls_back_to_groq_for_chat(mock_gemini_client_cls, mock_openai_cls, monkeypatch):
+def test_gemini_quota_error_falls_back_to_groq_for_chat(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
 
@@ -296,7 +300,7 @@ def test_gemini_quota_error_falls_back_to_groq_for_chat(mock_gemini_client_cls, 
         "experience_bullets": ["Bullet one."],
         "skills_section": "Python, SQL",
     })
-    mock_openai_cls.return_value = mock_groq_client
+    mock_groq_client_fn.return_value = mock_groq_client
 
     result = chat_about_resume(
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
@@ -313,9 +317,9 @@ def test_gemini_quota_error_falls_back_to_groq_for_chat(mock_gemini_client_cls, 
     mock_groq_client.chat.completions.create.assert_called_once()
 
 
-@patch("app.services.resume_builder.OpenAI")
+@patch("app.services.resume_builder.groq_client")
 @patch("app.services.resume_builder.genai.Client")
-def test_gemini_quota_error_without_groq_key_still_falls_back_normally(mock_gemini_client_cls, mock_openai_cls, monkeypatch):
+def test_gemini_quota_error_without_groq_key_still_falls_back_normally(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
     """If Groq isn't configured either, behavior must be identical to before Groq
     existed -- the deterministic fallback, not an error."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -329,12 +333,12 @@ def test_gemini_quota_error_without_groq_key_still_falls_back_normally(mock_gemi
 
     assert result["source"] == "fallback"
     assert "daily usage limit" in result["overall_assessment"]
-    mock_openai_cls.assert_not_called()
+    mock_groq_client_fn.assert_not_called()
 
 
-@patch("app.services.resume_builder.OpenAI")
+@patch("app.services.resume_builder.groq_client")
 @patch("app.services.resume_builder.genai.Client")
-def test_non_quota_gemini_error_never_calls_groq(mock_gemini_client_cls, mock_openai_cls, monkeypatch):
+def test_non_quota_gemini_error_never_calls_groq(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
     """Groq must only be attempted on a 429 -- any other Gemini failure (a real
     bug, bad request, server error) must fail over to the existing fallback
     exactly as before, never through Groq."""
@@ -350,12 +354,12 @@ def test_non_quota_gemini_error_never_calls_groq(mock_gemini_client_cls, mock_op
     result = generate_enhanced_resume("resume text", [], {})
 
     assert result["source"] == "fallback"
-    mock_openai_cls.assert_not_called()
+    mock_groq_client_fn.assert_not_called()
 
 
-@patch("app.services.resume_builder.OpenAI")
+@patch("app.services.resume_builder.groq_client")
 @patch("app.services.resume_builder.genai.Client")
-def test_groq_also_failing_falls_back_normally(mock_gemini_client_cls, mock_openai_cls, monkeypatch):
+def test_groq_also_failing_falls_back_normally(mock_gemini_client_cls, mock_groq_client_fn, monkeypatch):
     """If both providers fail, the user still gets the deterministic fallback,
     never a raw error."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -367,7 +371,7 @@ def test_groq_also_failing_falls_back_normally(mock_gemini_client_cls, mock_open
 
     mock_groq_client = Mock()
     mock_groq_client.chat.completions.create.side_effect = RuntimeError("Groq is down")
-    mock_openai_cls.return_value = mock_groq_client
+    mock_groq_client_fn.return_value = mock_groq_client
 
     result = generate_enhanced_resume("resume text", [], {"original_skills": ["Python"]})
 

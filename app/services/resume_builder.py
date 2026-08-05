@@ -4,7 +4,7 @@ import logging
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from openai import OpenAI
+from app.services.groq_client import GROQ_MODEL, groq_client, groq_json_instructions
 
 logger = logging.getLogger(__name__)
 
@@ -24,30 +24,15 @@ def _client(api_key: str) -> genai.Client:
 
 # --- Groq fallback -----------------------------------------------------------
 # Automatic second provider for when Gemini's quota/rate-limit is hit (429).
-# Uses Groq's OpenAI-compatible endpoint via the `openai` SDK. This only ever
-# triggers on a Gemini 429 — any other kind of Gemini failure (bad request,
-# server error, etc.) is a real bug and must keep failing over to the existing
-# deterministic fallback exactly as before, not mask itself behind a second
-# provider. If Groq itself also fails for any reason, callers treat that the
-# same as "no AI available" and fall through to the existing fallback path —
-# the user always gets a usable response, never a raw error.
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-# Groq is already a fallback reached after Gemini used its own retry budget —
-# don't stack a second multi-attempt retry loop on top of that; one retry is
-# enough headroom for a transient blip without adding much latency.
-_GROQ_MAX_RETRIES = 1
-
-
-def _groq_client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key, base_url=GROQ_BASE_URL, max_retries=_GROQ_MAX_RETRIES)
-
-
-def _groq_json_instructions(keys_description: str) -> str:
-    return (
-        f"\n\nRespond with ONLY a single JSON object (no markdown fences, no commentary before or after) "
-        f"with exactly these keys: {keys_description}"
-    )
+# Uses Groq's OpenAI-compatible endpoint via the `openai` SDK (see
+# app/services/groq_client.py for the shared client/constants used by every
+# AI service). This only ever triggers on a Gemini 429 — any other kind of
+# Gemini failure (bad request, server error, etc.) is a real bug and must
+# keep failing over to the existing deterministic fallback exactly as before,
+# not mask itself behind a second provider. If Groq itself also fails for any
+# reason, callers treat that the same as "no AI available" and fall through
+# to the existing fallback path — the user always gets a usable response,
+# never a raw error.
 
 
 def _generate_via_groq(resume_text: str, missing_skills: list[str]) -> dict:
@@ -60,11 +45,11 @@ def _generate_via_groq(resume_text: str, missing_skills: list[str]) -> dict:
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is not configured")
 
-    prompt = _build_prompt(resume_text, missing_skills) + _groq_json_instructions(
+    prompt = _build_prompt(resume_text, missing_skills) + groq_json_instructions(
         '"summary" (string), "experience_bullets" (array of strings), "skills_section" (string)'
     )
 
-    client = _groq_client(api_key)
+    client = groq_client(api_key)
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -111,7 +96,7 @@ def _chat_via_groq(
 
     system_prompt = _build_chat_system_prompt(
         resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
-    ) + _groq_json_instructions(
+    ) + groq_json_instructions(
         '"reply" (string), "summary" (string), "experience_bullets" (array of strings), "skills_section" (string)'
     )
 
@@ -122,7 +107,7 @@ def _chat_via_groq(
     if not conversation:
         messages.append({"role": "user", "content": "Please begin."})
 
-    client = _groq_client(api_key)
+    client = groq_client(api_key)
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=messages,

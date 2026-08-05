@@ -1,0 +1,303 @@
+"""
+AI-generated learning roadmap. Follows the same shape as the rest of this
+app's AI services (ai_interviewer.py, skill_assessment_ai.py): Gemini SDK, a
+GEMINI_API_KEY gate, structured JSON output, and a caller-side fallback (see
+app/services/learning_roadmap.py) when AI is disabled or unavailable.
+
+The roadmap is NOT built from the resume alone — the candidate's chosen
+target_role and industry are given highest priority in the prompt, so the
+plan covers what the role actually requires even for technologies the CV
+never mentions. The resume, job description, detected skill gaps, latest
+skill-assessment results, and latest interview feedback are all folded in as
+supporting context.
+"""
+import os
+import json
+import logging
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
+from app.services.groq_client import GROQ_MODEL, groq_client, groq_json_instructions
+
+logger = logging.getLogger(__name__)
+
+MODEL = "gemini-flash-latest"
+
+# The SDK's default retry policy (5 attempts, exponential backoff up to 60s) is
+# meant for transient errors — but a 429 caused by the daily quota being fully
+# exhausted will never succeed no matter how many times it's retried within
+# that window, so it just adds up to ~60s of dead time before even reaching
+# the Groq fallback below. Capping attempts keeps that worst case short.
+_RETRY_OPTIONS = genai_types.HttpRetryOptions(attempts=2)
+
+
+def _client(api_key: str) -> genai.Client:
+    return genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(retry_options=_RETRY_OPTIONS))
+
+STAGE_NAMES = ["Foundation", "Intermediate", "Advanced", "Job Ready"]
+TOPICS_PER_STAGE = 4
+
+_TOPIC_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "why_it_matters": {"type": "string"},
+        "learning_objectives": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 4},
+        "resources": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "type": {"type": "string", "enum": ["Course", "Free", "Book", "Docs", "Cert"]},
+                    "provider": {"type": "string"},
+                },
+                "required": ["name", "type", "provider"],
+                "additionalProperties": False,
+            },
+        },
+        "projects": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
+        "exercises": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
+        "estimated_hours": {"type": "integer"},
+        "priority": {"type": "string", "enum": ["critical", "high", "medium"]},
+    },
+    "required": ["title", "why_it_matters", "learning_objectives", "resources", "projects", "exercises", "estimated_hours", "priority"],
+    "additionalProperties": False,
+}
+
+ROADMAP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "stages": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "stage": {"type": "string", "enum": STAGE_NAMES},
+                    "description": {"type": "string"},
+                    "estimated_duration": {"type": "string"},
+                    "milestone": {"type": "string"},
+                    "topics": {
+                        "type": "array",
+                        "minItems": TOPICS_PER_STAGE,
+                        "maxItems": TOPICS_PER_STAGE,
+                        "items": _TOPIC_SCHEMA,
+                    },
+                },
+                "required": ["stage", "description", "estimated_duration", "milestone", "topics"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["stages"],
+    "additionalProperties": False,
+}
+
+
+def _build_prompt(
+    target_role: str,
+    industry: str,
+    experience_level: str,
+    resume_text: str,
+    resume_skills: list[str],
+    missing_skills: list[str],
+    jd_content: str,
+    skill_assessment_summary: str | None,
+    interview_summary: str | None,
+) -> str:
+    role_label = target_role or "the candidate's target role"
+    industry_label = f" in the {industry} industry" if industry else ""
+    level_label = f" ({experience_level} level)" if experience_level else ""
+
+    context_blocks = [
+        f"TARGET ROLE (highest priority — the roadmap must cover everything expected of this role, "
+        f"even skills not present anywhere else in this context): {role_label}{industry_label}{level_label}",
+    ]
+    if jd_content:
+        context_blocks.append(f"Target job description:\n{jd_content[:2000]}")
+    if resume_skills:
+        context_blocks.append(f"Skills already on the candidate's resume (do not re-teach these from scratch): {', '.join(resume_skills)}")
+    if resume_text:
+        context_blocks.append(f"Resume (for background/experience level context only, not the primary source of truth):\n{resume_text[:2500]}")
+    if missing_skills:
+        context_blocks.append(f"Skill gaps identified against the target job (prioritize these): {', '.join(missing_skills)}")
+    if skill_assessment_summary:
+        context_blocks.append(f"Latest skill assessment results (weak areas to reinforce):\n{skill_assessment_summary}")
+    if interview_summary:
+        context_blocks.append(f"Latest mock interview feedback (areas that need work):\n{interview_summary}")
+
+    context = "\n\n".join(context_blocks)
+
+    return f"""Design a complete, realistic learning roadmap to take this candidate from their current level to fully
+job-ready for the TARGET ROLE below. The target role and industry are the primary driver of what the roadmap must
+cover — build the roadmap around what a working professional in that role is actually expected to know, not just
+what's already on the resume. If the role requires something the resume doesn't mention, include it anyway.
+
+{context}
+
+Structure the roadmap into exactly 4 stages, in this exact order: Foundation, Intermediate, Advanced, Job Ready.
+- Foundation: core fundamentals and prerequisites for the role — what someone needs before anything else.
+- Intermediate: the core, everyday skills of the role.
+- Advanced: specialized, differentiating skills — including the identified skill gaps and anything that separates
+  a strong candidate from an average one for this specific role.
+- Job Ready: interview readiness, portfolio-building, system design/architecture thinking, and polish — the final
+  stretch before applying.
+
+For each stage, write a short description, a realistic estimated_duration (e.g. "2-3 weeks"), and a milestone: a
+concrete, checkable capability statement ("You can now build and deploy a full REST API with authentication").
+
+For each stage, generate exactly {TOPICS_PER_STAGE} topics. Each topic needs:
+- title: a specific topic, not a vague category (e.g. "REST API design and versioning", not "Backend basics").
+- why_it_matters: 1-2 sentences on why this specific topic matters for THIS role, grounded in real industry practice.
+- learning_objectives: 2-4 concrete, measurable things the candidate will be able to do after this topic.
+- resources: 2-3 realistic, named learning resources (real course names, official docs, well-known books) — mix
+  free and paid, and vary resource type (Course/Free/Book/Docs/Cert) rather than always picking the same type.
+- projects: 1-2 concrete project ideas that apply this topic in a portfolio-worthy way.
+- exercises: 1-2 smaller practical exercises to build the skill incrementally before the project.
+- estimated_hours: a realistic integer number of hours to reach working competence.
+- priority: "critical" if this closes an identified skill gap or is core to the role, "high" if it's important but
+  not urgent, "medium" if it rounds out the profile.
+
+Ground everything in what real companies actually expect for this role — this should read like a roadmap a senior
+engineer or hiring manager in this field would actually endorse, not generic advice.
+"""
+
+
+def _validate_roadmap(result: dict) -> bool:
+    stages = result.get("stages", [])
+    if len(stages) != 4:
+        return False
+    if [s.get("stage") for s in stages] != STAGE_NAMES:
+        return False
+    return True
+
+
+def _roadmap_via_groq(
+    target_role: str,
+    industry: str,
+    experience_level: str,
+    resume_text: str,
+    resume_skills: list[str],
+    missing_skills: list[str],
+    jd_content: str,
+    skill_assessment_summary: str | None,
+    interview_summary: str | None,
+) -> dict:
+    """Groq equivalent of the Gemini call in generate_learning_roadmap — same
+    prompt (reuses _build_prompt exactly), adapted only in how the JSON shape
+    is requested/parsed, since Groq's OpenAI-compatible API has JSON *mode*
+    but not Gemini's strict response_json_schema enforcement."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is not configured")
+
+    prompt = _build_prompt(
+        target_role, industry, experience_level, resume_text, resume_skills,
+        missing_skills, jd_content, skill_assessment_summary, interview_summary,
+    ) + groq_json_instructions(
+        '"stages" — an array of exactly 4 objects, in this exact order and with these exact "stage" values: '
+        '"Foundation", "Intermediate", "Advanced", "Job Ready". Each stage object needs "stage" (string), '
+        '"description" (string), "estimated_duration" (string), "milestone" (string), and "topics" (an array of '
+        f'exactly {TOPICS_PER_STAGE} objects, each with "title" (string), "why_it_matters" (string), '
+        '"learning_objectives" (array of strings), "resources" (array of objects with "name", "type", "provider" '
+        'strings), "projects" (array of strings), "exercises" (array of strings), "estimated_hours" (integer), '
+        'and "priority" ("critical", "high", or "medium"))'
+    )
+
+    client = groq_client(api_key)
+    response = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=8000,
+        response_format={"type": "json_object"},
+    )
+    result = json.loads(response.choices[0].message.content)
+    if not _validate_roadmap(result):
+        raise ValueError("Groq response did not match the required roadmap shape")
+    return result
+
+
+def _try_groq_roadmap(
+    target_role: str,
+    industry: str,
+    experience_level: str,
+    resume_text: str,
+    resume_skills: list[str],
+    missing_skills: list[str],
+    jd_content: str,
+    skill_assessment_summary: str | None,
+    interview_summary: str | None,
+) -> dict | None:
+    """Never raises — returns None on any failure so the caller can fall through
+    to the existing rule-based roadmap builder instead of surfacing an error."""
+    try:
+        result = _roadmap_via_groq(
+            target_role, industry, experience_level, resume_text, resume_skills,
+            missing_skills, jd_content, skill_assessment_summary, interview_summary,
+        )
+        logger.info("learning_roadmap_ai.generate_learning_roadmap served by groq (gemini quota/rate-limit hit)")
+        return result
+    except Exception:
+        logger.warning("learning_roadmap_ai.generate_learning_roadmap: groq fallback also failed", exc_info=True)
+        return None
+
+
+def generate_learning_roadmap(
+    target_role: str,
+    industry: str,
+    experience_level: str,
+    resume_text: str,
+    resume_skills: list[str],
+    missing_skills: list[str],
+    jd_content: str,
+    skill_assessment_summary: str | None = None,
+    interview_summary: str | None = None,
+    ai_enabled: bool = True,
+) -> dict | None:
+    """Returns {"stages": [...]} or None if AI is unavailable/disabled/fails —
+    callers should fall back to app/services/learning_roadmap.py's rule-based
+    builder in that case."""
+    if not ai_enabled:
+        return None
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        client = _client(api_key)
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=_build_prompt(
+                target_role, industry, experience_level, resume_text, resume_skills,
+                missing_skills, jd_content, skill_assessment_summary, interview_summary,
+            ),
+            config=genai_types.GenerateContentConfig(
+                max_output_tokens=8000,
+                response_mime_type="application/json",
+                response_json_schema=ROADMAP_SCHEMA,
+                thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
+            ),
+        )
+        result = json.loads(response.text)
+        if not _validate_roadmap(result):
+            return None
+        logger.info("learning_roadmap_ai.generate_learning_roadmap served by gemini")
+        return result
+    except genai_errors.ClientError as e:
+        if e.code == 429:
+            groq_result = _try_groq_roadmap(
+                target_role, industry, experience_level, resume_text, resume_skills,
+                missing_skills, jd_content, skill_assessment_summary, interview_summary,
+            )
+            if groq_result is not None:
+                return groq_result
+        logger.info("learning_roadmap_ai.generate_learning_roadmap served by fallback (gemini ClientError, code=%s)", e.code)
+        return None
+    except Exception:
+        logger.info("learning_roadmap_ai.generate_learning_roadmap served by fallback (unexpected gemini error)")
+        return None
