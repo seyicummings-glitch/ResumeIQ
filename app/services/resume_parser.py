@@ -2,6 +2,9 @@ import os
 from dotenv import load_dotenv
 from pypdf import PdfReader
 from docx import Document
+from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 import io
 import pytesseract
 from pdf2image import convert_from_bytes
@@ -44,10 +47,35 @@ def extract_text_with_ocr(file_bytes: bytes) -> str:
     return text
 
 
+def _iter_block_items(document):
+    """Yields paragraphs and tables in the order they actually appear in the
+    document body. python-docx's `document.paragraphs` only returns top-level
+    paragraphs and silently skips anything inside a table — but many resume
+    templates put contact info (phone, LinkedIn) or a skills list inside a
+    table/sidebar layout, so that content would otherwise never be extracted
+    at all, regardless of what parsing runs on the text afterward."""
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            yield Paragraph(child, document)
+        elif child.tag == qn("w:tbl"):
+            yield Table(child, document)
+
+
 def extract_text_from_docx(file_bytes: bytes) -> str:
     doc = Document(io.BytesIO(file_bytes))
-    text = "\n".join([para.text for para in doc.paragraphs])
-    return text
+    lines = []
+
+    for block in _iter_block_items(doc):
+        if isinstance(block, Paragraph):
+            if block.text.strip():
+                lines.append(block.text)
+        else:
+            for row in block.rows:
+                for cell in row.cells:
+                    if cell.text.strip():
+                        lines.append(cell.text)
+
+    return "\n".join(lines)
 
 
 def extract_text_from_txt(file_bytes: bytes) -> str:

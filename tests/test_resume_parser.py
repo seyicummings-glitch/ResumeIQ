@@ -34,3 +34,25 @@ def test_extract_text_from_docx():
     result = extract_resume_text("resume.docx", buf.getvalue())
     assert "Jane Doe" in result
     assert "Python" in result
+
+
+def test_extract_text_from_docx_with_table_layout():
+    # Many resume templates put contact info / skills in a table (a sidebar
+    # layout, for example) rather than plain paragraphs — python-docx's
+    # `.paragraphs` silently skips table content, so this must still surface it.
+    from docx import Document
+    import io
+
+    doc = Document()
+    doc.add_paragraph("Jane Doe")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Phone"
+    table.cell(0, 1).text = "+212 6 12 34 56 78"
+    table.cell(1, 0).text = "Skills"
+    table.cell(1, 1).text = "Python, Docker"
+    buf = io.BytesIO()
+    doc.save(buf)
+
+    result = extract_resume_text("resume.docx", buf.getvalue())
+    assert "+212 6 12 34 56 78" in result
+    assert "Python" in result

@@ -235,6 +235,39 @@ def test_chat_successful_call_returns_updated_draft(mock_client_cls, monkeypatch
 
 
 @patch("app.services.resume_builder.genai.Client")
+def test_chat_jd_content_included_in_system_prompt(mock_client_cls, monkeypatch):
+    """A job description extracted from a URL the user pasted (the AI itself
+    can't browse links) must actually ground the AI's tailoring, not just sit
+    unused in the request."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    mock_client = Mock()
+    mock_response = Mock()
+    mock_response.text = json.dumps({
+        "reply": "Tailored your resume toward this role.",
+        "summary": "Backend engineer.",
+        "experience_bullets": [],
+        "skills_section": "Python",
+    })
+    mock_client.models.generate_content.return_value = mock_response
+    mock_client_cls.return_value = mock_client
+
+    chat_about_resume(
+        conversation=[{"role": "user", "content": "Tailor my resume to this job."}],
+        resume_text="resume text",
+        missing_skills=[],
+        current_summary="",
+        current_experience_bullets=[],
+        current_skills_section="",
+        jd_content="We need a Backend Engineer skilled in Python, FastAPI, and PostgreSQL.",
+    )
+
+    sent_config = mock_client_cls.return_value.models.generate_content.call_args.kwargs["config"]
+    assert "FastAPI" in sent_config.system_instruction
+    assert "PostgreSQL" in sent_config.system_instruction
+
+
+@patch("app.services.resume_builder.genai.Client")
 def test_chat_error_leaves_draft_unchanged(mock_client_cls, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     # Must not depend on whatever GROQ_API_KEY happens to be in the real .env —

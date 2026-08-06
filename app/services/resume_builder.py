@@ -92,6 +92,7 @@ def _chat_via_groq(
     current_summary: str,
     current_experience_bullets: list[str],
     current_skills_section: str,
+    jd_content: str | None = None,
 ) -> dict:
     """Groq equivalent of the Gemini call in chat_about_resume — same grounding/
     draft-state/anti-fabrication system prompt (reuses _build_chat_system_prompt
@@ -103,7 +104,7 @@ def _chat_via_groq(
         raise RuntimeError("GROQ_API_KEY is not configured")
 
     system_prompt = _build_chat_system_prompt(
-        resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
+        resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section, jd_content
     ) + groq_json_instructions(
         '"reply" (string), "summary" (string), "experience_bullets" (array of strings), "skills_section" (string)'
     )
@@ -137,12 +138,14 @@ def _try_groq_chat(
     current_summary: str,
     current_experience_bullets: list[str],
     current_skills_section: str,
+    jd_content: str | None = None,
 ) -> dict | None:
     """Never raises — returns None on any failure so the caller can fall through
     to the existing deterministic fallback instead of surfacing an error."""
     try:
         result = _chat_via_groq(
-            conversation, resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
+            conversation, resume_text, missing_skills, current_summary, current_experience_bullets,
+            current_skills_section, jd_content,
         )
         logger.info("resume_builder.chat_about_resume served by groq (gemini quota/rate-limit hit)")
         return result
@@ -293,6 +296,7 @@ def _build_chat_system_prompt(
     current_summary: str,
     current_experience_bullets: list[str],
     current_skills_section: str,
+    jd_content: str | None = None,
 ) -> str:
     bullets_text = "\n".join(f"- {b}" for b in current_experience_bullets) if current_experience_bullets else "(none)"
     skills_list = ", ".join(missing_skills) if missing_skills else "none noted"
@@ -317,12 +321,22 @@ def _build_chat_system_prompt(
         else "(nothing drafted yet)"
     )
 
+    jd_block = (
+        f"\n\nTarget job description the user wants this resume tailored to match (they extracted this from a "
+        f"job posting link, or pasted it in) — prioritize the skills, keywords, and requirements it asks for "
+        f"whenever you write or revise the draft, without fabricating anything the user's real background "
+        f"doesn't support:\n{jd_content[:3000]}"
+        if jd_content
+        else ""
+    )
+
     return (
         "You are an AI resume-building assistant having a conversation with the user to help them build "
         "a new resume or edit an existing one.\n\n"
         f"{grounding}\n\n"
         f"Skills identified as missing against a target job (if any): {skills_list}\n\n"
-        f"Current draft of the resume you're building/editing together:\n{draft_state}\n\n"
+        f"Current draft of the resume you're building/editing together:\n{draft_state}"
+        f"{jd_block}\n\n"
         "The user will ask you to add, remove, or change parts of this draft, describe their background "
         "for you to turn into resume content, or ask general questions. Apply requests to the CURRENT "
         "DRAFT above, building on it incrementally.\n\n"
@@ -348,6 +362,7 @@ def chat_about_resume(
     current_experience_bullets: list[str],
     current_skills_section: str,
     ai_enabled: bool = True,
+    jd_content: str | None = None,
 ) -> dict:
     """One turn of AI-assisted, conversational resume editing. conversation is a list of
     {"role": "user"|"assistant", "content": str} in chronological order, not including the reply
@@ -390,7 +405,8 @@ def chat_about_resume(
                     max_output_tokens=6000,
                     thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
                     system_instruction=_build_chat_system_prompt(
-                        resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
+                        resume_text, missing_skills, current_summary, current_experience_bullets,
+                        current_skills_section, jd_content,
                     ),
                     response_mime_type="application/json",
                     response_json_schema=CHAT_SCHEMA,
@@ -422,7 +438,8 @@ def chat_about_resume(
 
     # Every configured Gemini key hit a 429 — try Groq before giving up.
     groq_result = _try_groq_chat(
-        conversation, resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section
+        conversation, resume_text, missing_skills, current_summary, current_experience_bullets,
+        current_skills_section, jd_content,
     )
     if groq_result is not None:
         return groq_result

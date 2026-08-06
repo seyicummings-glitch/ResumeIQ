@@ -6,6 +6,8 @@ from app.schemas import (
     UserCreate,
     UserLogin,
     UserResponse,
+    UserUpdate,
+    PasswordChange,
     Token,
     PasswordResetRequest,
     PasswordResetConfirm,
@@ -19,6 +21,7 @@ from app.security import (
     verify_password_reset_token,
     require_admin,
 )
+from app.services.email_service import is_email_configured, send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -58,6 +61,42 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.patch("/me", response_model=UserResponse)
+def update_me(
+    data: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if data.email is not None and data.email != current_user.email:
+        existing = db.query(User).filter(User.email == data.email).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="That email is already registered to another account.")
+        current_user.email = data.email
+
+    profile_fields = data.model_dump(exclude_unset=True, exclude={"email"})
+    for field, value in profile_fields.items():
+        setattr(current_user, field, value)
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.post("/change-password")
+def change_password(
+    data: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not verify_password(data.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+
+    current_user.hashed_password = hash_password(data.new_password)
+    db.commit()
+
+    return {"message": "Password updated successfully."}
+
+
 @router.post("/logout")
 def logout(current_user: User = Depends(get_current_user)):
     return {"message": "Successfully logged out. Please discard your access token."}
@@ -67,13 +106,24 @@ def logout(current_user: User = Depends(get_current_user)):
 def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user:
-        return {"message": "If that email exists, a reset link has been generated."}
+        return {"message": "If that email exists, a reset link has been sent to it."}
 
     reset_token = create_password_reset_token(user.email)
-    return {
-        "message": "Password reset token generated.",
-        "reset_token": reset_token
-    }
+
+    if not is_email_configured():
+        # Dev fallback: no SMTP configured, so hand the token back directly
+        # instead of silently failing to deliver a reset link.
+        return {
+            "message": "Password reset token generated.",
+            "reset_token": reset_token
+        }
+
+    try:
+        send_password_reset_email(user.email, reset_token)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not send the reset email. Please try again later.")
+
+    return {"message": "If that email exists, a reset link has been sent to it."}
 
 
 @router.post("/password-reset/confirm")

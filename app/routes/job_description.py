@@ -4,7 +4,9 @@ from sqlalchemy.orm import Session
 import requests
 from bs4 import BeautifulSoup
 from app.services.job_description_parser import parse_job_description
+from app.services.job_description_ai import parse_job_description_ai
 from app.services.resume_parser import extract_resume_text
+from app.services.platform_settings import is_ai_enabled
 from app.database import get_db
 from app.models.models import JobDescription, User
 from app.schemas import JobDescriptionCreate, JobDescriptionResponse
@@ -12,27 +14,110 @@ from app.security import get_current_user
 
 router = APIRouter(prefix="/job-description", tags=["Job Description"])
 
+# CSS selectors known to hold just the posting body on common job boards —
+# tried in order; the first one that actually matches with real content wins,
+# which is far more precise than dumping the whole page's text.
+_MAIN_CONTENT_SELECTORS = [
+    ".description__text",  # LinkedIn
+    ".show-more-less-html__markup",  # LinkedIn (expanded description)
+    "#jobDescriptionText",  # Indeed
+    "#content .opening",  # Greenhouse
+    "#content",  # Greenhouse (generic)
+    ".posting-page",  # Lever
+    ".section-wrapper",  # Lever
+    "[data-testid='jobDescriptionText']",
+    "article",
+    "main",
+    "[role='main']",
+]
+
+# Short, common UI strings that survive tag-stripping on job boards but are
+# never part of the actual posting — removed as a last cleanup pass.
+_BOILERPLATE_PHRASES = [
+    "Skip to main content",
+    "Apply Save Report this job",
+    "Apply now",
+    "Save job",
+    "Report this job",
+    "Sign in to see who",
+    "See who",
+    "has hired for this role",
+    "Direct message the job poster",
+    "We use cookies",
+    "Accept cookies",
+    "Accept all cookies",
+]
+
+_NOISE_CLASS_KEYWORDS = [
+    "cookie", "banner", "menu", "sidebar", "social", "share", "subscribe",
+    "newsletter", "advert", "promo", "related", "similar", "breadcrumb",
+    "pagination", "comment",
+]
+
+
+def _extract_job_posting_text(soup: BeautifulSoup) -> str:
+    """Best-effort extraction of just the job posting body from a scraped
+    page, without a full headless browser or main-content-extraction library:
+    strip obvious chrome, prefer a known job-board content container when one
+    matches, and fall back to the whole page's text only as a last resort."""
+    for tag in soup(["script", "style", "nav", "header", "footer", "svg", "noscript", "iframe", "form", "button", "aside"]):
+        tag.decompose()
+
+    for element in soup.find_all(class_=True) + soup.find_all(id=True):
+        # Decomposing a parent earlier in this list detaches any of its
+        # children that also appear later in it — skip those rather than
+        # touching a dead Tag.
+        if getattr(element, "decomposed", False):
+            continue
+        identifiers = " ".join(element.get("class") or []) + " " + (element.get("id") or "")
+        if any(keyword in identifiers.lower() for keyword in _NOISE_CLASS_KEYWORDS):
+            element.decompose()
+
+    for selector in _MAIN_CONTENT_SELECTORS:
+        match = soup.select_one(selector)
+        if match:
+            candidate = match.get_text(separator=" ", strip=True)
+            if len(candidate) > 150:
+                return candidate
+
+    text = soup.get_text(separator=" ", strip=True)
+    for phrase in _BOILERPLATE_PHRASES:
+        text = text.replace(phrase, " ")
+    return " ".join(text.split())
+
+
+def _parse_with_ai_fallback(text: str, db: Session) -> dict:
+    """AI-first job description parsing: real, named skills instead of raw
+    word-frequency noise. Falls back to the rule-based parser (and echoes the
+    original text back as "cleaned_description") when AI is unavailable."""
+    ai_result = parse_job_description_ai(text, ai_enabled=is_ai_enabled(db))
+    if ai_result:
+        return {**ai_result, "source": "ai"}
+
+    fallback = parse_job_description(text)
+    return {**fallback, "title": "", "cleaned_description": text, "source": "fallback"}
+
 
 class JobDescriptionInput(BaseModel):
     content: str
 
 
 @router.post("/parse")
-def parse_jd_text(data: JobDescriptionInput):
-    result = parse_job_description(data.content)
-    return {"source": "text", "job_description_analysis": result}
+def parse_jd_text(data: JobDescriptionInput, db: Session = Depends(get_db)):
+    result = _parse_with_ai_fallback(data.content, db)
+    return {"source": result["source"], "job_description_analysis": result}
 
 
 @router.post("/parse-file")
-async def parse_jd_file(file: UploadFile = File(...)):
+async def parse_jd_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
         file_bytes = await file.read()
         text = extract_resume_text(file.filename, file_bytes)
-        result = parse_job_description(text)
+        result = _parse_with_ai_fallback(text, db)
         return {
-            "source": "file",
+            "source": result["source"],
             "filename": file.filename,
-            "extracted_text_preview": text[:500],
+            "extracted_text_preview": result["cleaned_description"],
             "job_description_analysis": result
         }
     except ValueError as e:
@@ -46,27 +131,23 @@ class JobDescriptionURLInput(BaseModel):
 
 
 @router.post("/parse-url")
-def parse_jd_url(data: JobDescriptionURLInput):
+def parse_jd_url(data: JobDescriptionURLInput, db: Session = Depends(get_db)):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(data.url, headers=headers, timeout=10)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
-
-        for tag in soup(["script", "style", "nav", "header", "footer"]):
-            tag.decompose()
-
-        text = soup.get_text(separator=" ", strip=True)
+        text = _extract_job_posting_text(soup)
 
         if len(text.strip()) < 50:
             raise HTTPException(status_code=400, detail="Could not extract meaningful content from this URL.")
 
-        result = parse_job_description(text)
+        result = _parse_with_ai_fallback(text, db)
         return {
-            "source": "url",
+            "source": result["source"],
             "url": data.url,
-            "extracted_text_preview": text[:500],
+            "extracted_text_preview": result["cleaned_description"],
             "job_description_analysis": result
         }
     except requests.RequestException as e:
