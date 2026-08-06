@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getRoadmap, toggleRoadmapItem } from '../api/roadmap'
+import { getRoadmap, regenerateRoadmap, toggleRoadmapTopic } from '../api/roadmap'
 
 export function useLearningRoadmap() {
   return useQuery({
@@ -8,10 +8,20 @@ export function useLearningRoadmap() {
   })
 }
 
-export function useToggleRoadmapItem() {
+export function useRegenerateRoadmap() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: toggleRoadmapItem,
+    mutationFn: regenerateRoadmap,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['roadmap'], data)
+    },
+  })
+}
+
+export function useToggleRoadmapTopic() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: toggleRoadmapTopic,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['roadmap'] })
     },

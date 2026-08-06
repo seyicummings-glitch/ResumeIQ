@@ -1,29 +1,52 @@
+import { apiRequest } from './client'
 import { getMe } from './auth'
 
-const OVERRIDES_KEY = 'resumeiq_profile_overrides'
-
-function readOverrides() {
-  try {
-    return JSON.parse(localStorage.getItem(OVERRIDES_KEY)) || {}
-  } catch {
-    return {}
-  }
+export function getProfile() {
+  return getMe()
 }
 
 /**
- * There is no PUT /profile endpoint on the backend yet, so edits are merged
- * on top of the real /auth/me data and persisted to this device only.
- * Swapping to a real backend later means replacing the body of this
- * function with an apiRequest('/profile', { method: 'PUT', ... }) call —
- * every caller (useProfile hook, ProfilePage) stays the same.
+ * @param {{fullName?: string, email?: string, phone?: string, location?: string,
+ *   linkedinUrl?: string, githubUrl?: string, portfolioUrl?: string, targetRole?: string,
+ *   industry?: string, experienceLevel?: string, careerGoals?: string}} fields
  */
-export async function getProfile() {
-  const me = await getMe()
-  return { ...me, ...readOverrides() }
+export function updateProfile({
+  fullName,
+  email,
+  phone,
+  location,
+  linkedinUrl,
+  githubUrl,
+  portfolioUrl,
+  targetRole,
+  industry,
+  experienceLevel,
+  careerGoals,
+}) {
+  return apiRequest('/auth/me', {
+    method: 'PATCH',
+    auth: true,
+    body: {
+      full_name: fullName,
+      email,
+      phone,
+      location,
+      linkedin_url: linkedinUrl,
+      github_url: githubUrl,
+      portfolio_url: portfolioUrl,
+      target_role: targetRole,
+      industry,
+      experience_level: experienceLevel,
+      career_goals: careerGoals,
+    },
+  })
 }
 
-export async function updateProfile(fields) {
-  const overrides = { ...readOverrides(), ...fields }
-  localStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides))
-  return getProfile()
+/** @param {{currentPassword: string, newPassword: string}} fields */
+export function changePassword({ currentPassword, newPassword }) {
+  return apiRequest('/auth/change-password', {
+    method: 'POST',
+    auth: true,
+    body: { current_password: currentPassword, new_password: newPassword },
+  })
 }

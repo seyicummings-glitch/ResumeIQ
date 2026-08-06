@@ -97,6 +97,57 @@ export async function apiRequest(path, { method = 'GET', body, auth = false, que
   return data
 }
 
+/**
+ * Like apiRequest, but for endpoints that return a raw binary body (e.g. audio) instead of
+ * JSON — a plain <audio src="..."> can't attach an Authorization header, so protected binary
+ * downloads need to go through fetch + an object URL instead.
+ * @param {string} path
+ * @param {{auth?: boolean, signal?: AbortSignal}} [options]
+ * @returns {Promise<Blob>}
+ */
+export async function apiRequestBlob(path, { auth = false, signal } = {}) {
+  const headers = {}
+  if (auth) {
+    const token = getToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
+  }
+
+  let response
+  try {
+    response = await fetch(buildUrl(path), { headers, signal })
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Check your connection and try again.', null)
+  }
+
+  if (!response.ok) {
+    let detail = null
+    try {
+      detail = (await response.json())?.detail
+    } catch {
+      detail = null
+    }
+    if (response.status === 401) {
+      clearToken()
+      unauthorizedHandler?.()
+    }
+    throw new ApiError(response.status, extractErrorMessage(detail), detail)
+  }
+
+  return response.blob()
+}
+
+/** Triggers a real browser download for a blob via a temporary, invisible <a> element. */
+export function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 /** Builds a FormData body from a plain object, skipping undefined/null values. File/Blob values are appended as files, everything else as strings. */
 export function toFormData(fields) {
   const formData = new FormData()

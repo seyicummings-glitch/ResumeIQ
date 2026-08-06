@@ -1,4 +1,4 @@
-import { apiRequest } from './client'
+import { apiRequest, apiRequestBlob } from './client'
 
 /**
  * @typedef {Object} InterviewQuestion
@@ -19,4 +19,72 @@ import { apiRequest } from './client'
 /** @returns {Promise<InterviewQuestionsResult>} */
 export function getInterviewQuestions() {
   return apiRequest('/interview/questions', { auth: true })
+}
+
+/**
+ * @typedef {Object} ChatMessage
+ * @property {'interviewer'|'candidate'} role
+ * @property {string} content
+ *
+ * @typedef {Object} InterviewChatReply
+ * @property {string} feedback - critique of the candidate's previous answer; empty string on the first turn
+ * @property {string} question - the next question, or closing remarks once done is true
+ * @property {'ai'|'fallback'} source
+ * @property {boolean} done
+ */
+
+/**
+ * One turn of the live mock interview. Send the full transcript so far
+ * (not including the reply being requested) and get the interviewer's next
+ * message back — no server-side session, the frontend owns the transcript.
+ * preferredLanguage (the browser's locale, e.g. navigator.language) seeds the
+ * language of the interviewer's opening message; it then follows whatever
+ * language the candidate actually writes in.
+ * @param {{conversation: ChatMessage[], preferredLanguage: string | undefined}} params
+ * @returns {Promise<InterviewChatReply>}
+ */
+export function sendInterviewMessage({ conversation, preferredLanguage }) {
+  return apiRequest('/interview/chat', {
+    method: 'POST',
+    auth: true,
+    body: { conversation, preferred_language: preferredLanguage },
+  })
+}
+
+/**
+ * @typedef {Object} InterviewFeedback
+ * @property {string} overall_assessment
+ * @property {string[]} strengths
+ * @property {string[]} areas_to_improve
+ * @property {string[]} study_topics
+ * @property {string[]} role_knowledge_tips
+ * @property {'ai'|'fallback'} source
+ *
+ * @typedef {Object} SaveInterviewSessionResult
+ * @property {number} id
+ * @property {InterviewFeedback} feedback
+ * @property {boolean} hasAudio
+ */
+
+/**
+ * Persists a completed interview session — the full transcript and the recorded audio, if the
+ * browser supported capturing it — and returns the AI-generated post-interview feedback report.
+ * @param {{transcript: ChatMessage[], audioBlob: Blob | null}} params
+ * @returns {Promise<SaveInterviewSessionResult>}
+ */
+export async function saveInterviewSession({ transcript, audioBlob }) {
+  const formData = new FormData()
+  formData.append('transcript', JSON.stringify(transcript))
+  if (audioBlob) {
+    const extension = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
+    formData.append('audio', audioBlob, `interview-recording.${extension}`)
+  }
+
+  const row = await apiRequest('/interview/sessions', { method: 'POST', auth: true, body: formData })
+  return { id: row.id, feedback: row.feedback, hasAudio: row.has_audio }
+}
+
+/** Fetches a past session's recorded audio as a Blob, for local playback via an object URL. */
+export function fetchInterviewSessionAudio(sessionId) {
+  return apiRequestBlob(`/interview/sessions/${sessionId}/audio`, { auth: true })
 }

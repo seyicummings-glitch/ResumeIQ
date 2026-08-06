@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getAssessmentBuild, getAssessmentHistory, submitAssessment } from '../api/skillAssessment'
+import { getAssessmentBuild, getAssessmentHistory, submitAssessment, DEFAULT_QUESTION_COUNT } from '../api/skillAssessment'
 
-export function useSkillAssessmentBuild(options = {}) {
+export function useSkillAssessmentBuild(questionCount = DEFAULT_QUESTION_COUNT, options = {}) {
   return useQuery({
-    queryKey: ['skillAssessment', 'build'],
-    queryFn: getAssessmentBuild,
+    queryKey: ['skillAssessment', 'build', questionCount],
+    queryFn: () => getAssessmentBuild(questionCount),
     ...options,
   })
 }

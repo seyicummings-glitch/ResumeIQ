@@ -1,170 +1,281 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
-import { CircleCheckBig } from 'lucide-react'
+import clsx from 'clsx'
+import { GitBranch, Sparkles, FileText, Link2, FileUp } from 'lucide-react'
 import * as resumeApi from '../../api/resume'
+import * as jdApi from '../../api/jobDescription'
+import * as matchingApi from '../../api/matching'
+import { useAuth } from '../../auth/AuthContext'
+import { useResumeDraft } from '../../resume/ResumeDraftContext'
 import FileDropzone from '../../components/ui/FileDropzone'
 import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
-import Stepper from '../../components/ui/Stepper'
-import ScoreGauge from '../../components/charts/ScoreGauge'
+import TextArea from '../../components/ui/TextArea'
+import Input from '../../components/ui/Input'
 import ErrorState from '../../components/ui/ErrorState'
-import Badge from '../../components/ui/Badge'
 import { useToast } from '../../components/ui/Toast'
-import { buttonClasses } from '../../components/ui/Button'
 
-const STEPS = ['Upload & preview', 'ATS score', 'Save']
+const JD_MODES = [
+  { id: 'text', icon: FileText, title: 'Paste text' },
+  { id: 'url', icon: Link2, title: 'Job URL' },
+  { id: 'file', icon: FileUp, title: 'Upload file' },
+]
+
+const EXPERIENCE_LEVELS = [
+  { id: 'entry', label: 'Entry', sub: '0-2 yrs' },
+  { id: 'mid', label: 'Mid', sub: '3-5 yrs' },
+  { id: 'senior', label: 'Senior', sub: '6-10 yrs' },
+  { id: 'exec', label: 'Exec', sub: '10+ yrs' },
+]
+
+function SectionLabel({ children }) {
+  return <p className="mb-1.5 font-mono text-xs uppercase tracking-wide text-text/70">{children}</p>
+}
+
+const STAGE_LABELS = {
+  saving: 'Saving your resume…',
+  matching: 'Running the real matching engine…',
+  done: 'Done!',
+}
 
 export default function ResumeUploadPage() {
-  const [file, setFile] = useState(null)
-  const [jobDescriptionText, setJobDescriptionText] = useState('')
+  const { isAuthenticated } = useAuth()
   const { showToast } = useToast()
+  const navigate = useNavigate()
+
+  const { draft, updateDraft } = useResumeDraft()
+  const { file, jdTab, jobDescription, jdFile, jdUrl, experienceLevel, githubUsername } = draft
+  const [stage, setStage] = useState('idle')
+
+  const jdExtractMutation = useMutation({
+    mutationFn: (overrideFile) => (jdTab === 'file' ? jdApi.parseFile(overrideFile ?? jdFile) : jdApi.parseUrl(jdUrl)),
+    onSuccess: (result) => updateDraft({ jobDescription: result.extracted_text_preview || '' }),
+  })
+
+  function handleJdTabChange(tabId) {
+    updateDraft({ jdTab: tabId })
+    jdExtractMutation.reset()
+  }
+
+  function handleJdFileSelected(nextFile) {
+    updateDraft({ jdFile: nextFile })
+    jdExtractMutation.reset()
+    if (nextFile) jdExtractMutation.mutate(nextFile)
+  }
 
   const analyzeMutation = useMutation({
-    mutationFn: async (selectedFile) => {
-      const [uploadResult, atsResult] = await Promise.all([
-        resumeApi.uploadResume(selectedFile),
-        resumeApi.getAtsScore(selectedFile),
-      ])
-      return { uploadResult, atsResult }
+    mutationFn: async () => {
+      setStage('saving')
+      const atsResponse = await resumeApi.getAtsScore(file)
+      const detectedGithub = atsResponse.contact_info?.github || null
+      updateDraft({ githubUsername: detectedGithub })
+
+      const savedResume = await resumeApi.saveResume(file)
+      const savedJd = await jdApi.saveJobDescription({ title: undefined, content: jobDescription })
+
+      setStage('matching')
+      const savedAnalysis = await matchingApi.saveAnalysis({
+        resumeId: savedResume.resume_id,
+        jobDescriptionId: savedJd.id,
+      })
+
+      setStage('done')
+      return savedAnalysis
     },
-  })
-
-  const suggestionsMutation = useMutation({
-    mutationFn: () => resumeApi.getAiSuggestions(file, jobDescriptionText || undefined),
-  })
-
-  const saveMutation = useMutation({
-    mutationFn: () => resumeApi.saveResume(file),
-    onSuccess: () => showToast('Resume saved to your account.', { tone: 'success' }),
+    onSuccess: (savedAnalysis) => {
+      showToast('Analysis complete.', { tone: 'success' })
+      navigate(`/analysis-results/${savedAnalysis.analysis_id}`)
+    },
+    onError: () => setStage('idle'),
   })
 
   function handleFileSelected(nextFile) {
-    setFile(nextFile)
+    updateDraft({ file: nextFile })
     analyzeMutation.reset()
-    suggestionsMutation.reset()
-    saveMutation.reset()
-    if (nextFile) analyzeMutation.mutate(nextFile)
+    setStage('idle')
   }
 
-  const currentStep = saveMutation.isSuccess ? 2 : analyzeMutation.isSuccess ? 1 : 0
-  const atsResult = analyzeMutation.data?.atsResult?.ats_result
+  const isAnalyzing = analyzeMutation.isPending
+  const canAnalyze = Boolean(file) && jobDescription.trim().length > 0 && isAuthenticated && !isAnalyzing
+
+  const wordCount = jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0
+  const jdWasAiExtracted = jdExtractMutation.isSuccess && jdExtractMutation.data.source === 'ai'
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 py-8">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 py-8">
       <div>
-        <h1 className="text-2xl font-semibold text-text-h">Upload your resume</h1>
-        <p className="mt-1 text-sm text-text">PDF or Word (.docx), up to 10MB.</p>
+        <h1 className="text-2xl font-semibold text-text-h">Analyze Resume</h1>
+        <p className="mt-1 text-sm text-text">
+          Upload your resume and a job description — we'll run the real match analysis and take you straight to
+          your results.
+        </p>
       </div>
 
-      <Stepper steps={STEPS} currentStep={currentStep} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="flex flex-col gap-3">
+          <div>
+            <SectionLabel>Resume file</SectionLabel>
+            <FileDropzone
+              accept={resumeApi.ALLOWED_RESUME_EXTENSIONS}
+              maxSizeMb={resumeApi.MAX_RESUME_FILE_SIZE_MB}
+              file={file}
+              onFileSelected={handleFileSelected}
+              emptyTitle="Drop resume here"
+              emptySubtitle="PDF · DOCX · TXT · max 10 MB"
+            />
+          </div>
 
-      <FileDropzone
-        label="Resume file"
-        hint="Accepted formats: PDF, DOCX"
-        accept={resumeApi.ALLOWED_RESUME_EXTENSIONS}
-        maxSizeMb={resumeApi.MAX_RESUME_FILE_SIZE_MB}
-        file={file}
-        onFileSelected={handleFileSelected}
-      />
-
-      {analyzeMutation.isPending && (
-        <Card>
-          <p className="text-sm text-text">Analyzing your resume…</p>
-        </Card>
-      )}
-
-      {analyzeMutation.isError && (
-        <ErrorState message={analyzeMutation.error.message} onRetry={() => analyzeMutation.mutate(file)} />
-      )}
-
-      {analyzeMutation.isSuccess && atsResult && (
-        <Card className="flex flex-col gap-6">
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <ScoreGauge score={atsResult.overall_ats_score} label="ATS score" />
-            <div className="flex-1">
-              <p className="text-sm text-text">
-                Extracted {analyzeMutation.data.uploadResult.character_count.toLocaleString()} characters from{' '}
-                {analyzeMutation.data.uploadResult.filename}.
+          <Card className="flex items-start gap-3 border-success/30 bg-success-bg p-3">
+            <GitBranch size={16} className="mt-0.5 shrink-0 text-success" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-medium text-success">
+                {githubUsername ? `GitHub auto-detected: @${githubUsername}` : 'GitHub auto-detected from resume'}
               </p>
-              {atsResult.issues.length > 0 ? (
-                <ul className="mt-3 flex flex-col gap-1.5">
-                  {atsResult.issues.map((issue) => (
-                    <li key={issue} className="text-sm text-text-h">
-                      • {issue}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-3 text-sm text-success">No issues found — this resume looks ATS-friendly.</p>
-              )}
+              <p className="text-xs text-success/80">
+                We'll automatically find and analyze your public repos from the GitHub URL in your resume.
+              </p>
             </div>
-          </div>
+          </Card>
+        </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => saveMutation.mutate()} isLoading={saveMutation.isPending} disabled={saveMutation.isSuccess}>
-              {saveMutation.isSuccess ? (
-                <>
-                  <CircleCheckBig size={16} aria-hidden="true" /> Saved
-                </>
-              ) : (
-                'Save to my resumes'
-              )}
-            </Button>
-            {saveMutation.isSuccess && (
-              <Link to="/dashboard" className={buttonClasses({ variant: 'secondary' })}>
-                Go to dashboard
-              </Link>
-            )}
-          </div>
-          {saveMutation.isError && <p className="text-sm text-danger">{saveMutation.error.message}</p>}
-        </Card>
-      )}
-
-      {analyzeMutation.isSuccess && (
-        <Card className="flex flex-col gap-3">
-          <h2 className="text-base font-semibold text-text-h">Get AI suggestions (optional)</h2>
-          <label htmlFor="jd-context" className="text-sm font-medium text-text-h">
-            Target job description (optional)
-          </label>
-          <textarea
-            id="jd-context"
-            rows={4}
-            value={jobDescriptionText}
-            onChange={(event) => setJobDescriptionText(event.target.value)}
-            placeholder="Paste a job description to tailor suggestions toward it…"
-            className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text-h"
-          />
-          <Button
-            variant="secondary"
-            onClick={() => suggestionsMutation.mutate()}
-            isLoading={suggestionsMutation.isPending}
-            className="w-fit"
-          >
-            Get suggestions
-          </Button>
-
-          {suggestionsMutation.isError && <p className="text-sm text-danger">{suggestionsMutation.error.message}</p>}
-
-          {suggestionsMutation.isSuccess && (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-2">
-                <Badge tone={suggestionsMutation.data.ai_suggestions.source === 'ai' ? 'accent' : 'neutral'}>
-                  {suggestionsMutation.data.ai_suggestions.source === 'ai' ? 'AI-generated' : 'Rule-based fallback'}
-                </Badge>
-              </div>
-              <p className="text-sm text-text-h">{suggestionsMutation.data.ai_suggestions.overall_assessment}</p>
-              {suggestionsMutation.data.ai_suggestions.suggestions.map((suggestion, index) => (
-                <div key={index} className="rounded-lg border border-border p-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-accent">{suggestion.category}</p>
-                  <p className="mt-1 text-sm text-text-h">{suggestion.issue}</p>
-                  <p className="mt-1 text-sm text-text">{suggestion.suggestion}</p>
-                </div>
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <SectionLabel>Job description</SectionLabel>
+            <div className="flex gap-1 rounded-md bg-surface p-0.5">
+              {JD_MODES.map(({ id, icon: Icon, title }) => (
+                <button
+                  key={id}
+                  type="button"
+                  title={title}
+                  onClick={() => handleJdTabChange(id)}
+                  className={clsx(
+                    'flex h-7 w-7 items-center justify-center rounded transition-colors',
+                    jdTab === id ? 'bg-accent/20 text-accent' : 'text-text/60 hover:text-text-h'
+                  )}
+                >
+                  <Icon size={13} aria-hidden="true" />
+                </button>
               ))}
             </div>
+          </div>
+
+          {jdTab === 'file' && (
+            <div className="mb-3 flex flex-col gap-3">
+              <FileDropzone
+                accept={jdApi.ALLOWED_JD_FILE_EXTENSIONS}
+                file={jdFile}
+                onFileSelected={handleJdFileSelected}
+                emptyTitle="Upload JD document"
+                emptySubtitle="TXT · PDF · DOCX"
+              />
+              {jdExtractMutation.isPending && <p className="text-sm text-text/70">Extracting the job description…</p>}
+              {jdExtractMutation.isError && <p className="text-sm text-danger">{jdExtractMutation.error.message}</p>}
+            </div>
           )}
+
+          {jdTab === 'url' && (
+            <div className="mb-3 flex flex-col gap-3">
+              <Input
+                label="Job posting URL"
+                type="url"
+                value={jdUrl}
+                onChange={(event) => updateDraft({ jdUrl: event.target.value })}
+                placeholder="https://example.com/careers/senior-engineer"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-fit"
+                onClick={() => jdExtractMutation.mutate()}
+                isLoading={jdExtractMutation.isPending}
+                disabled={!jdUrl.trim()}
+              >
+                Extract job description from URL
+              </Button>
+              {jdExtractMutation.isError && <p className="text-sm text-danger">{jdExtractMutation.error.message}</p>}
+            </div>
+          )}
+
+          {jdExtractMutation.isSuccess && jdTab !== 'text' && (
+            <p
+              className={clsx(
+                'mb-3 rounded-lg px-3 py-2 text-xs',
+                jdWasAiExtracted ? 'bg-success-bg text-success' : 'bg-warning-bg text-warning'
+              )}
+            >
+              {jdWasAiExtracted
+                ? 'Extracted the job posting content below — review it, then analyze.'
+                : "Extracted the raw page text below — AI cleanup wasn't available, so review and trim it before analyzing."}
+            </p>
+          )}
+
+          <TextArea
+            rows={7}
+            value={jobDescription}
+            onChange={(event) => updateDraft({ jobDescription: event.target.value })}
+            placeholder="Paste the full job description here — required skills, qualifications, responsibilities…"
+          />
+          <p className="mt-1.5 font-mono text-xs text-text/60">
+            {wordCount} word{wordCount === 1 ? '' : 's'} · Richer JDs yield better keyword analysis
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <SectionLabel>Experience level</SectionLabel>
+        <div className="grid grid-cols-4 gap-2">
+          {EXPERIENCE_LEVELS.map(({ id, label, sub }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => updateDraft({ experienceLevel: id })}
+              className={clsx(
+                'rounded-md border px-2 py-2 text-center transition-colors',
+                experienceLevel === id ? 'border-accent bg-accent/10 text-accent' : 'border-border text-text hover:bg-surface'
+              )}
+            >
+              <div className="text-xs font-semibold">{label}</div>
+              <div className="font-mono text-[10px] opacity-70">{sub}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isAnalyzing ? (
+        <Card className="flex flex-col gap-2 p-4">
+          <div className="flex items-center gap-2 font-mono text-sm text-accent">
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+            {STAGE_LABELS[stage] || STAGE_LABELS.saving}
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-border">
+            <div
+              className="h-full rounded-full bg-accent transition-all duration-500"
+              style={{ width: stage === 'done' ? '100%' : stage === 'matching' ? '65%' : '25%' }}
+            />
+          </div>
         </Card>
+      ) : (
+        <div>
+          <Button onClick={() => analyzeMutation.mutate()} disabled={!canAnalyze}>
+            <Sparkles size={15} aria-hidden="true" /> Analyze Resume
+          </Button>
+          {!isAuthenticated && (
+            <p className="mt-2 text-xs text-text/70">
+              <Link to="/login" className="font-medium text-accent hover:underline">
+                Log in
+              </Link>{' '}
+              to analyze and save your resume.
+            </p>
+          )}
+          {isAuthenticated && !file && <p className="mt-2 text-xs text-text/70">Upload a resume file to get started.</p>}
+          {isAuthenticated && file && !jobDescription.trim() && (
+            <p className="mt-2 text-xs text-text/70">Add a job description to analyze against.</p>
+          )}
+        </div>
       )}
+
+      {analyzeMutation.isError && <ErrorState message={analyzeMutation.error.message} onRetry={() => analyzeMutation.mutate()} />}
     </div>
   )
 }

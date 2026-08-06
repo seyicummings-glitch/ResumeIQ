@@ -19,6 +19,10 @@ import { apiRequest } from './client'
  * @property {string} uploadedAt
  * @property {string[]} skills
  * @property {LatestScores|null} latestScores
+ * @property {number|null} latestAnalysisId
+ * @property {number|null} latestJobDescriptionId
+ * @property {string|null} latestJobTitle
+ * @property {boolean} hasDownloadableFile
  */
 
 function toResumeVersion(row) {
@@ -31,6 +35,10 @@ function toResumeVersion(row) {
     uploadedAt: row.uploaded_at,
     skills: row.skills,
     latestScores: row.latest_scores,
+    latestAnalysisId: row.latest_analysis_id,
+    latestJobDescriptionId: row.latest_job_description_id,
+    latestJobTitle: row.latest_job_title,
+    hasDownloadableFile: row.has_downloadable_file,
   }
 }
 

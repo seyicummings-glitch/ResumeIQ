@@ -62,3 +62,33 @@ export function saveAnalysis({ resumeId, jobDescriptionId }) {
     body: { resume_id: resumeId, job_description_id: jobDescriptionId },
   })
 }
+
+/**
+ * AI-powered suggestions for an already-saved analysis, using the resume's stored
+ * parsed text — no file re-upload needed, unlike getAiSuggestions in api/resume.js.
+ * @param {number} analysisId
+ */
+export function getAnalysisSuggestions(analysisId) {
+  return apiRequest(`/matching/${analysisId}/suggestions`, { method: 'POST', auth: true })
+}
+
+/** @param {number} analysisId @returns {Promise<{message: string}>} */
+export function deleteAnalysis(analysisId) {
+  return apiRequest(`/matching/${analysisId}`, { method: 'DELETE', auth: true })
+}
+
+/**
+ * @typedef {Object} AnalysisCompareSummary
+ * @property {number} id
+ * @property {string|null} resume_filename
+ * @property {string|null} job_description_title
+ * @property {number|null} overall_match_score
+ * @property {SkillMatch|null} skill_match
+ * @property {string} created_at
+ *
+ * @param {{aId: number, bId: number}} params
+ * @returns {Promise<{analysis_a: AnalysisCompareSummary, analysis_b: AnalysisCompareSummary, skill_diff: {resolved:string[], remaining:string[], added:string[]}}>}
+ */
+export function compareAnalyses({ aId, bId }) {
+  return apiRequest('/matching/compare', { auth: true, query: { a: aId, b: bId } })
+}

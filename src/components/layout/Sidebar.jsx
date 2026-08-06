@@ -1,22 +1,22 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Upload, ListChecks, Clock, User, Shield, LogOut, ChevronLeft, ChevronRight, FolderOpen, Brain, MessageSquare, Map, Sparkles, GitCompare } from 'lucide-react'
+import { LayoutDashboard, Upload, Clock, User, Shield, LogOut, ChevronLeft, ChevronRight, FolderOpen, Brain, MessageSquare, Map, Sparkles, GitCompare, BarChart3 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../auth/AuthContext'
 import Logo from './Logo'
 
 export const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/resume/upload', label: 'Analyze resume', icon: Upload },
-  { to: '/resume-builder', label: 'AI Resume Builder', icon: Sparkles },
-  { to: '/resume/versions', label: 'Version History', icon: GitCompare },
-  { to: '/job-description/new', label: 'Job description', icon: ListChecks },
-  { to: '/history', label: 'Analysis history', icon: Clock },
-  { to: '/documents', label: 'Documents', icon: FolderOpen },
+  { to: '/resume/upload', label: 'Analyze Resume', icon: Upload },
+  { to: '/analysis-results', label: 'Analysis Results', icon: BarChart3 },
   { to: '/skill-assessment', label: 'Skill Assessment', icon: Brain },
-  { to: '/interview-practice', label: 'Interview Practice', icon: MessageSquare },
+  { to: '/resume-builder', label: 'AI Resume Builder', icon: Sparkles },
   { to: '/roadmap', label: 'Learning Roadmap', icon: Map },
-  { to: '/profile', label: 'My profile', icon: User },
+  { to: '/interview-practice', label: 'Interview Practice', icon: MessageSquare },
+  { to: '/history', label: 'Analysis History', icon: Clock },
+  { to: '/resume/versions', label: 'Version History', icon: GitCompare },
+  { to: '/documents', label: 'Documents', icon: FolderOpen },
+  { to: '/profile', label: 'My Profile', icon: User },
   { to: '/admin/users', label: 'Admin panel', icon: Shield, adminOnly: true },
 ]
 

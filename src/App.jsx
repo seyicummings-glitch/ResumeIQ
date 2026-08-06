@@ -12,10 +12,9 @@ import ForgotPasswordPage from './pages/auth/ForgotPasswordPage'
 import ResetPasswordPage from './pages/auth/ResetPasswordPage'
 import ProfilePage from './pages/ProfilePage'
 import ResumeUploadPage from './pages/resume/ResumeUploadPage'
-import JobDescriptionPage from './pages/jobDescription/JobDescriptionPage'
 import DashboardPage from './pages/DashboardPage'
 import HistoryPage from './pages/HistoryPage'
-import HistoryDetailPage from './pages/HistoryDetailPage'
+import AnalysisResultsPage from './pages/AnalysisResultsPage'
 import DocumentsPage from './pages/DocumentsPage'
 import SkillAssessmentPage from './pages/SkillAssessmentPage'
 import InterviewPracticePage from './pages/InterviewPracticePage'
@@ -38,7 +37,6 @@ export default function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route path="/job-description/new" element={<JobDescriptionPage />} />
         <Route path="/403" element={<ForbiddenPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
@@ -50,7 +48,8 @@ export default function App() {
           <Route path="/resume/upload" element={<ResumeUploadPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/history" element={<HistoryPage />} />
-          <Route path="/history/:id" element={<HistoryDetailPage />} />
+          <Route path="/analysis-results" element={<AnalysisResultsPage />} />
+          <Route path="/analysis-results/:id" element={<AnalysisResultsPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/skill-assessment" element={<SkillAssessmentPage />} />
           <Route path="/interview-practice" element={<InterviewPracticePage />} />

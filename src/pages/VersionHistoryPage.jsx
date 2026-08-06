@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { GitCompare, ArrowUp, ArrowDown, Minus, History as HistoryIcon } from 'lucide-react'
-import { useResumeVersions, useCompareResumeVersions } from '../hooks/useResumeVersions'
+import { GitCompare, ArrowUp, ArrowDown, Minus, History as HistoryIcon, Download } from 'lucide-react'
+import { useResumeVersions, useCompareResumeVersions, useDownloadResume } from '../hooks/useResumeVersions'
+import { useToast } from '../components/ui/Toast'
 import { Table, TableHead, Th, TableBody, Td } from '../components/ui/Table'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
@@ -84,7 +85,7 @@ function SkillChipList({ title, skills, tone }) {
   )
 }
 
-function VersionListRow({ version }) {
+function VersionListRow({ version, onDownload, isDownloading }) {
   return (
     <tr>
       <Td>
@@ -116,15 +117,34 @@ function VersionListRow({ version }) {
           <span className="text-sm text-text">No analysis yet</span>
         )}
       </Td>
+      <Td>
+        <Button variant="secondary" size="sm" onClick={onDownload} isLoading={isDownloading} title="Download this version">
+          <Download size={14} aria-hidden="true" />
+        </Button>
+      </Td>
     </tr>
   )
 }
 
 export default function VersionHistoryPage() {
   const { data: versions, isLoading, isError, error, refetch } = useResumeVersions()
+  const { showToast } = useToast()
+  const downloadMutation = useDownloadResume()
+  const [downloadingId, setDownloadingId] = useState(null)
   const [mode, setMode] = useState('list')
   const [aId, setAId] = useState(null)
   const [bId, setBId] = useState(null)
+
+  function handleDownload(version) {
+    setDownloadingId(version.id)
+    downloadMutation.mutate(
+      { resumeId: version.id, filename: version.filename },
+      {
+        onSettled: () => setDownloadingId(null),
+        onError: (err) => showToast(err.message, { tone: 'error' }),
+      }
+    )
+  }
 
   useEffect(() => {
     if (versions && versions.length >= 2 && (aId === null || bId === null)) {
@@ -188,10 +208,16 @@ export default function VersionHistoryPage() {
             <Th>Uploaded</Th>
             <Th>Skills</Th>
             <Th>Latest score</Th>
+            <Th>Download</Th>
           </TableHead>
           <TableBody>
             {versions.map((version) => (
-              <VersionListRow key={version.id} version={version} />
+              <VersionListRow
+                key={version.id}
+                version={version}
+                onDownload={() => handleDownload(version)}
+                isDownloading={downloadingId === version.id}
+              />
             ))}
           </TableBody>
         </Table>

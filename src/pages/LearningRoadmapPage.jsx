@@ -1,18 +1,35 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Map, Clock, Target, Layers, ChevronDown, ChevronUp, CircleCheck, Circle, ExternalLink } from 'lucide-react'
+import {
+  Map,
+  Clock,
+  Target,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  CircleCheck,
+  Circle,
+  ExternalLink,
+  Flag,
+  RotateCcw,
+  Sparkles,
+  FolderKanban,
+  Dumbbell,
+} from 'lucide-react'
 import clsx from 'clsx'
-import { useLearningRoadmap, useToggleRoadmapItem } from '../hooks/useLearningRoadmap'
+import { useLearningRoadmap, useToggleRoadmapTopic, useRegenerateRoadmap } from '../hooks/useLearningRoadmap'
 import Card from '../components/ui/Card'
-import { buttonClasses } from '../components/ui/Button'
+import Button, { buttonClasses } from '../components/ui/Button'
+import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
 import ErrorState from '../components/ui/ErrorState'
 import EmptyState from '../components/ui/EmptyState'
+import { useToast } from '../components/ui/Toast'
 
-const IMPORTANCE_TONE = {
-  critical: 'text-danger',
-  high: 'text-warning',
-  medium: 'text-text',
+const PRIORITY_TONE = {
+  critical: 'danger',
+  high: 'warning',
+  medium: 'neutral',
 }
 
 function StatCard({ icon: Icon, label, value }) {
@@ -29,7 +46,18 @@ function StatCard({ icon: Icon, label, value }) {
   )
 }
 
-function RoadmapItemRow({ item, onToggle, isToggling }) {
+function SourceBadge({ source }) {
+  if (source === 'ai') {
+    return (
+      <Badge tone="accent">
+        <Sparkles size={11} aria-hidden="true" /> AI-powered
+      </Badge>
+    )
+  }
+  return <Badge tone="neutral">Rule-based</Badge>
+}
+
+function TopicRow({ topic, onToggle, isToggling }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -37,12 +65,12 @@ function RoadmapItemRow({ item, onToggle, isToggling }) {
       <div className="flex items-start gap-3 px-4 py-3">
         <button
           type="button"
-          onClick={() => onToggle(item.skill)}
+          onClick={() => onToggle(topic.topic_key)}
           disabled={isToggling}
-          aria-label={item.done ? `Mark ${item.skill} as not done` : `Mark ${item.skill} as done`}
+          aria-label={topic.done ? `Mark ${topic.title} as not done` : `Mark ${topic.title} as done`}
           className="mt-0.5 shrink-0 text-text hover:text-accent disabled:opacity-50"
         >
-          {item.done ? <CircleCheck size={20} className="text-success" aria-hidden="true" /> : <Circle size={20} aria-hidden="true" />}
+          {topic.done ? <CircleCheck size={20} className="text-success" aria-hidden="true" /> : <Circle size={20} aria-hidden="true" />}
         </button>
 
         <button
@@ -52,11 +80,12 @@ function RoadmapItemRow({ item, onToggle, isToggling }) {
           className="flex flex-1 items-center justify-between gap-3 text-left"
         >
           <div>
-            <p className={clsx('font-medium text-text-h', item.done && 'text-text/50 line-through')}>{item.skill}</p>
-            <p className="mt-0.5 text-xs text-text">
-              <span className={clsx('font-semibold', IMPORTANCE_TONE[item.importance])}>{item.importance}</span>
-              {' · '}
-              {item.type} · {item.provider} · {item.duration}
+            <p className={clsx('font-medium text-text-h', topic.done && 'text-text/50 line-through')}>{topic.title}</p>
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-text">
+              <Badge tone={PRIORITY_TONE[topic.priority] || 'neutral'} className="!text-[10px]">
+                {topic.priority}
+              </Badge>
+              {topic.estimated_hours}h estimated
             </p>
           </div>
           {expanded ? (
@@ -68,25 +97,104 @@ function RoadmapItemRow({ item, onToggle, isToggling }) {
       </div>
 
       {expanded && (
-        <div className="px-4 pb-4 pl-11">
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">Resources</p>
-          <ul className="flex flex-col gap-1.5">
-            {item.resources.map((resource) => (
-              <li key={resource} className="flex items-start gap-1.5 text-sm text-text">
-                <ExternalLink size={13} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
-                <span>{resource}</span>
-              </li>
-            ))}
-          </ul>
+        <div className="flex flex-col gap-4 px-4 pb-4 pl-11">
+          <p className="text-sm text-text">{topic.why_it_matters}</p>
+
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">Learning objectives</p>
+            <ul className="flex flex-col gap-1 text-sm text-text">
+              {topic.learning_objectives.map((objective, index) => (
+                <li key={index}>• {objective}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">Resources</p>
+            <ul className="flex flex-col gap-1.5">
+              {topic.resources.map((resource, index) => (
+                <li key={index} className="flex items-start gap-1.5 text-sm text-text">
+                  <ExternalLink size={13} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+                  <span>
+                    {resource.name} <span className="text-text/60">— {resource.type} · {resource.provider}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">
+                <FolderKanban size={12} aria-hidden="true" /> Projects
+              </p>
+              <ul className="flex flex-col gap-1 text-sm text-text">
+                {topic.projects.map((project, index) => (
+                  <li key={index}>• {project}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">
+                <Dumbbell size={12} aria-hidden="true" /> Practical exercises
+              </p>
+              <ul className="flex flex-col gap-1 text-sm text-text">
+                {topic.exercises.map((exercise, index) => (
+                  <li key={index}>• {exercise}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
+function StageCard({ stage, onToggleTopic, isToggling }) {
+  const doneCount = stage.topics.filter((t) => t.done).length
+
+  return (
+    <Card className="p-0">
+      <div className="border-b border-border px-4 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold text-text-h">{stage.stage}</h2>
+          <span className="text-xs text-text">
+            {doneCount}/{stage.topics.length} complete · {stage.estimated_duration}
+          </span>
+        </div>
+        <p className="mt-1 text-sm text-text">{stage.description}</p>
+        <div className="mt-3 flex items-start gap-2 rounded-md bg-accent/10 p-3">
+          <Flag size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+          <p className="text-sm text-text-h">
+            <span className="font-semibold">Milestone: </span>
+            {stage.milestone}
+          </p>
+        </div>
+      </div>
+      <div>
+        {stage.topics.map((topic) => (
+          <TopicRow key={topic.topic_key} topic={topic} onToggle={onToggleTopic} isToggling={isToggling} />
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 export default function LearningRoadmapPage() {
   const { data, isLoading, isError, error, refetch } = useLearningRoadmap()
-  const toggleMutation = useToggleRoadmapItem()
+  const toggleMutation = useToggleRoadmapTopic()
+  const regenerateMutation = useRegenerateRoadmap()
+  const { showToast } = useToast()
+
+  async function handleRegenerate() {
+    try {
+      await regenerateMutation.mutateAsync()
+      showToast('Generated a new roadmap.', { tone: 'success' })
+    } catch (err) {
+      showToast(err.message, { tone: 'error' })
+    }
+  }
 
   if (isLoading) {
     return (
@@ -100,32 +208,56 @@ export default function LearningRoadmapPage() {
     return <ErrorState message={error.message} onRetry={refetch} />
   }
 
-  if (!data.has_gaps) {
+  if (!data.has_context) {
     return (
       <div className="py-8">
         <h1 className="mb-6 text-2xl font-semibold text-text-h">Learning roadmap</h1>
         <EmptyState
           icon={Map}
-          title="No skill gaps detected, or analyze a resume first"
-          description="Save an analysis from your dashboard to get a personalized skill-gap learning roadmap."
+          title="Set a target role or save an analysis first"
+          description="Your roadmap is built primarily around the target role and industry in your profile — set those, or save a resume analysis, to unlock a personalized plan."
           action={
-            <Link to="/dashboard" className={buttonClasses()}>
-              Go to dashboard
-            </Link>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link to="/profile" className={buttonClasses()}>
+                Set target role
+              </Link>
+              <Link to="/dashboard" className={buttonClasses({ variant: 'secondary' })}>
+                Go to dashboard
+              </Link>
+            </div>
           }
         />
       </div>
     )
   }
 
-  const { phases, stats } = data
+  const { roadmap } = data
+  const { stages, stats } = roadmap
   const progressPct = stats.total_count > 0 ? Math.round((stats.done_count / stats.total_count) * 100) : 0
 
   return (
     <div className="flex flex-col gap-6 py-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-text-h">Learning roadmap</h1>
-        <p className="mt-1 text-sm text-text">A phased plan to close the skill gaps from your latest analysis.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-text-h">Learning roadmap</h1>
+            <SourceBadge source={roadmap.source} />
+          </div>
+          <p className="mt-1 text-sm text-text">
+            {roadmap.target_role ? (
+              <>
+                A complete path to becoming job-ready as a <span className="font-medium text-text-h">{roadmap.target_role}</span>
+                {roadmap.industry ? <> in {roadmap.industry}</> : null}.
+              </>
+            ) : (
+              'A phased plan to close the skill gaps from your latest analysis.'
+            )}
+          </p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={handleRegenerate} isLoading={regenerateMutation.isPending}>
+          <RotateCcw size={14} aria-hidden="true" />
+          Regenerate roadmap
+        </Button>
       </div>
 
       <Card>
@@ -142,27 +274,17 @@ export default function LearningRoadmapPage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard icon={Clock} label="Estimated hours" value={stats.total_hours} />
-        <StatCard icon={Target} label="Skill gaps" value={stats.total_count} />
-        <StatCard icon={Layers} label="Phases" value={phases.length} />
+        <StatCard icon={Target} label="Topics" value={stats.total_count} />
+        <StatCard icon={Layers} label="Stages" value={stages.length} />
       </div>
 
-      {phases.map((phase) => (
-        <Card key={phase.phase} className="p-0">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-base font-semibold text-text-h">{phase.phase}</h2>
-            <span className="text-xs text-text">{phase.timeframe}</span>
-          </div>
-          <div>
-            {phase.items.map((item) => (
-              <RoadmapItemRow
-                key={item.skill}
-                item={item}
-                onToggle={(skill) => toggleMutation.mutate({ skill })}
-                isToggling={toggleMutation.isPending}
-              />
-            ))}
-          </div>
-        </Card>
+      {stages.map((stage) => (
+        <StageCard
+          key={stage.stage}
+          stage={stage}
+          onToggleTopic={(topicKey) => toggleMutation.mutate({ topicKey })}
+          isToggling={toggleMutation.isPending}
+        />
       ))}
     </div>
   )

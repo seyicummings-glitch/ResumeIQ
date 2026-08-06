@@ -7,6 +7,8 @@ import App from './App.jsx'
 import { AuthProvider } from './auth/AuthContext'
 import { ThemeProvider } from './theme/ThemeContext'
 import { ToastProvider } from './components/ui/Toast'
+import { ResumeDraftProvider } from './resume/ResumeDraftContext'
+import { ResumeBuilderDraftProvider } from './resume/ResumeBuilderDraftContext'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,7 +26,11 @@ createRoot(document.getElementById('root')).render(
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <ToastProvider>
-              <App />
+              <ResumeDraftProvider>
+                <ResumeBuilderDraftProvider>
+                  <App />
+                </ResumeBuilderDraftProvider>
+              </ResumeDraftProvider>
             </ToastProvider>
           </AuthProvider>
         </QueryClientProvider>

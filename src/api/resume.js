@@ -1,6 +1,6 @@
-import { apiRequest, toFormData } from './client'
+import { apiRequest, apiRequestBlob, triggerBlobDownload, toFormData } from './client'
 
-export const ALLOWED_RESUME_EXTENSIONS = ['.pdf', '.docx']
+export const ALLOWED_RESUME_EXTENSIONS = ['.pdf', '.docx', '.txt']
 export const MAX_RESUME_FILE_SIZE_MB = 10
 
 /**
@@ -91,4 +91,15 @@ export function saveResume(file) {
 /** @returns {Promise<SavedResume[]>} */
 export function getMyResumes() {
   return apiRequest('/resume/my-resumes', { auth: true })
+}
+
+/** Downloads the original uploaded file (or a .txt fallback for resumes saved before file storage existed). */
+export async function downloadResumeFile(resumeId, filename) {
+  const blob = await apiRequestBlob(`/resume/${resumeId}/download`, { auth: true })
+  triggerBlobDownload(blob, filename)
+}
+
+/** @returns {Promise<{message: string}>} */
+export function deleteResume(resumeId) {
+  return apiRequest(`/resume/${resumeId}`, { method: 'DELETE', auth: true })
 }

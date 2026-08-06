@@ -10,10 +10,10 @@ export const ALLOWED_JD_FILE_EXTENSIONS = ['.pdf', '.docx', '.txt']
  * @property {string[]} keywords
  *
  * @typedef {Object} ParsedJobDescription
- * @property {'text'|'file'|'url'} source
+ * @property {'ai'|'fallback'} source - whether Gemini parsed real named skills, or the rule-based fallback ran
  * @property {string} [filename]
  * @property {string} [url]
- * @property {string} [extracted_text_preview]
+ * @property {string} [extracted_text_preview] - the full cleaned job posting text (not truncated) when source is "ai"
  * @property {JobDescriptionAnalysis} job_description_analysis
  *
  * @typedef {Object} SavedJobDescription

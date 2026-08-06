@@ -1,33 +1,42 @@
 import { apiRequest } from './client'
 
 /**
- * @typedef {Object} SkillQuestion
+ * @typedef {Object} AssessmentQuestion
  * @property {number} id
- * @property {string} category_key
- * @property {string} category_label
- * @property {'beginner'|'intermediate'|'advanced'} difficulty
- * @property {string} question
- * @property {string[]} options
- * @property {number} correct_index
- * @property {string} explanation
- * @property {string} tip
- *
- * @typedef {Object} SoftScenario
+ * @property {'technical'|'scenario'|'problem_solving'|'behavioral'} type
+ * @property {'text'|'multiple_choice'} input_type
  * @property {string} category
- * @property {string} scenario
+ * @property {'beginner'|'intermediate'|'advanced'} [difficulty]
+ * @property {string} question
+ * @property {string[]} [options] - multiple_choice only
+ * @property {number} [correct_index] - multiple_choice only
+ * @property {string} [explanation] - multiple_choice only
+ * @property {string} [tip] - multiple_choice only
  *
  * @typedef {Object} AssessmentBuild
- * @property {SkillQuestion[]} questions
- * @property {SoftScenario[]} soft_scenarios
+ * @property {number|null} session_id
+ * @property {'ai'|'fallback'|null} source
+ * @property {AssessmentQuestion[]} questions
  * @property {string[]} detected_categories
- * @property {boolean} has_analysis
+ * @property {boolean} has_context
+ * @property {string} [jd_title]
  *
  * @typedef {Object} CategoryBreakdownEntry
  * @property {string} category_key
  * @property {string} category_label
- * @property {number} correct
- * @property {number} total
  * @property {number} pct
+ *
+ * @typedef {Object} QuestionFeedback
+ * @property {number} question_id
+ * @property {'technical'|'scenario'|'problem_solving'|'behavioral'} type
+ * @property {string} category
+ * @property {string} [difficulty]
+ * @property {string} question
+ * @property {string|null} answer
+ * @property {number} score
+ * @property {boolean} is_correct
+ * @property {string} explanation
+ * @property {string} correct_answer_or_improvement
  *
  * @typedef {Object} AssessmentResult
  * @property {number} technical_score
@@ -36,6 +45,8 @@ import { apiRequest } from './client'
  * @property {number} correct_count
  * @property {number} total
  * @property {CategoryBreakdownEntry[]} category_breakdown
+ * @property {QuestionFeedback[]} question_feedback
+ * @property {'ai'|'fallback'} source
  * @property {number} attempt_id
  *
  * @typedef {Object} AssessmentAttempt
@@ -44,32 +55,49 @@ import { apiRequest } from './client'
  * @property {number} soft_score
  * @property {number} overall_score
  * @property {CategoryBreakdownEntry[]} category_breakdown
+ * @property {'ai'|'fallback'} source
  * @property {string} created_at
  */
 
+export const MIN_QUESTION_COUNT = 5
+export const MAX_QUESTION_COUNT = 25
+export const DEFAULT_QUESTION_COUNT = 15
+export const QUESTION_COUNT_OPTIONS = [5, 10, 15, 20, 25]
+
 /**
- * Personalizes a technical question set + soft-skill scenarios from the user's
- * latest saved analysis (resume skills + missing skills).
+ * Builds a fresh, personalized assessment (technical, scenario-based,
+ * problem-solving, and behavioral questions) from the user's latest saved
+ * analysis. AI-generated and graded when a Gemini key is configured;
+ * otherwise a randomized multiple-choice fallback bank.
+ * @param {number} [questionCount] - total questions, 5-25 (default 15)
  * @returns {Promise<AssessmentBuild>}
  */
-export function getAssessmentBuild() {
-  return apiRequest('/skill-assessment/build', { auth: true })
+export function getAssessmentBuild(questionCount = DEFAULT_QUESTION_COUNT) {
+  return apiRequest('/skill-assessment/build', { auth: true, query: { question_count: questionCount } })
 }
 
 /**
- * Scores are always recomputed server-side from the question ids + answers — the
- * client never sends a score directly.
- * @param {{questionIds: number[], technicalAnswers: Object<string, number>, softAnswerTexts: string[]}} params
+ * @typedef {Object} AssessmentAnswer
+ * @property {number} questionId
+ * @property {string} [answerText] - free-text questions
+ * @property {number} [answerIndex] - multiple_choice questions
+ *
+ * Scores are always recomputed server-side from the session's stored rubric —
+ * the client never sends a score or the correct answer directly.
+ * @param {{sessionId: number, answers: AssessmentAnswer[]}} params
  * @returns {Promise<AssessmentResult>}
  */
-export function submitAssessment({ questionIds, technicalAnswers, softAnswerTexts }) {
+export function submitAssessment({ sessionId, answers }) {
   return apiRequest('/skill-assessment/submit', {
     method: 'POST',
     auth: true,
     body: {
-      question_ids: questionIds,
-      technical_answers: technicalAnswers,
-      soft_answer_texts: softAnswerTexts,
+      session_id: sessionId,
+      answers: answers.map(({ questionId, answerText, answerIndex }) => ({
+        question_id: questionId,
+        answer_text: answerText ?? null,
+        answer_index: answerIndex ?? null,
+      })),
     },
   })
 }

@@ -8,9 +8,9 @@ import { validateFile } from '../../lib/fileValidation'
  * whole dropzone (so click-anywhere-to-browse and Tab+Enter both work);
  * drag-and-drop on the wrapping div is progressive enhancement on top of it,
  * never the only way to choose a file.
- * @param {{accept: string[], maxSizeMb?: number, file: File|null, onFileSelected: (file: File|null) => void, label: string, hint?: string, error?: string}} props
+ * @param {{accept: string[], maxSizeMb?: number, file: File|null, onFileSelected: (file: File|null) => void, label?: string, hint?: string, error?: string, emptyTitle?: string, emptySubtitle?: string}} props
  */
-export default function FileDropzone({ accept, maxSizeMb = 10, file, onFileSelected, label, hint, error }) {
+export default function FileDropzone({ accept, maxSizeMb = 10, file, onFileSelected, label, hint, error, emptyTitle, emptySubtitle }) {
   const inputId = useId()
   const inputRef = useRef(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -39,9 +39,11 @@ export default function FileDropzone({ accept, maxSizeMb = 10, file, onFileSelec
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={inputId} className="text-sm font-medium text-text-h">
-        {label}
-      </label>
+      {label && (
+        <label htmlFor={inputId} className="text-sm font-medium text-text-h">
+          {label}
+        </label>
+      )}
       <div
         onDragOver={(event) => {
           event.preventDefault()
@@ -84,9 +86,19 @@ export default function FileDropzone({ accept, maxSizeMb = 10, file, onFileSelec
         ) : (
           <div className="pointer-events-none">
             <Upload size={28} className="mx-auto text-text/60" aria-hidden="true" />
-            <p className="mt-2 text-sm text-text">
-              Drag a file here, or <span className="font-medium text-accent underline">browse</span>
-            </p>
+            {emptyTitle ? (
+              <>
+                <p className="mt-2 text-sm font-semibold text-text-h">{emptyTitle}</p>
+                {emptySubtitle && <p className="mt-1 text-xs text-text">{emptySubtitle}</p>}
+                <p className="mt-2 text-xs">
+                  or <span className="font-medium text-accent underline">click to browse</span>
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-text">
+                Drag a file here, or <span className="font-medium text-accent underline">browse</span>
+              </p>
+            )}
           </div>
         )}
       </div>
