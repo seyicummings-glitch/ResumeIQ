@@ -37,10 +37,15 @@ export default function LoginPage() {
   async function onSubmit(values) {
     setFormError(null)
     try {
-      await login(values)
+      const me = await login(values)
       showToast('Logged in successfully.', { tone: 'success' })
       const redirect = searchParams.get('redirect')
-      navigate(redirect || '/dashboard', { replace: true })
+      // Admins land on the Admin Dashboard by default — "Switch to User
+      // View" is there if they want the regular customer experience instead.
+      // An explicit redirect (e.g. bounced here from a protected page) still
+      // wins over that default.
+      const destination = redirect || (me.role === 'admin' ? '/admin' : '/dashboard')
+      navigate(destination, { replace: true })
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setFormError('Incorrect email or password.')
