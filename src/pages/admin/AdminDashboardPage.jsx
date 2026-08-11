@@ -47,11 +47,11 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         {Object.entries(KPI_LABELS).map(([key, label]) => (
-          <Card key={key}>
-            <p className="text-sm text-text">{label}</p>
-            <p className="mt-1 text-2xl font-semibold text-text-h">
+          <Card key={key} className="!p-3">
+            <p className="text-xs text-text">{label}</p>
+            <p className="mt-1 text-lg font-semibold text-text-h">
               {kpis[key] === null || kpis[key] === undefined
                 ? '—'
                 : key === 'averageMatchScore'
