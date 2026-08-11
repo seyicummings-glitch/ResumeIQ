@@ -1,10 +1,11 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Sun, Moon, User, Eye } from 'lucide-react'
+import { Sun, Moon, User, Eye, Shield } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 import { useTheme } from '../../theme/ThemeContext'
 import SkipToContentLink from './SkipToContentLink'
 import Sidebar, { NAV_ITEMS } from './Sidebar'
 import GlobalCareerCoach from '../coach/GlobalCareerCoach'
+import Button from '../ui/Button'
 
 function UserViewBanner({ onReturnToAdmin }) {
   return (
@@ -29,6 +30,7 @@ export default function AppShell() {
   const location = useLocation()
   const isLight = theme === 'light'
   const isViewingAsUser = isAdmin && viewMode === 'user'
+  const onAdminPages = location.pathname.startsWith('/admin')
 
   const currentLabel = NAV_ITEMS.find((item) => location.pathname.startsWith(item.to))?.label ?? 'ResumeIQ'
 
@@ -42,6 +44,12 @@ export default function AppShell() {
           <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg px-6">
             <span className="font-mono text-xs text-text">{currentLabel}</span>
             <div className="flex items-center gap-2">
+              {isAdmin && !onAdminPages && (
+                <Button variant="secondary" size="sm" onClick={switchToAdminView}>
+                  <Shield size={14} aria-hidden="true" />
+                  Switch to Admin View
+                </Button>
+              )}
               <button
                 type="button"
                 onClick={toggle}

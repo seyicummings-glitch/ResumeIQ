@@ -5,7 +5,6 @@ import {
   Upload,
   Clock,
   User,
-  Shield,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -36,7 +35,6 @@ export const NAV_ITEMS = [
   { to: '/history', label: 'Analysis History', icon: Clock },
   { to: '/resume/versions', label: 'Version History', icon: GitCompare },
   { to: '/profile', label: 'My Profile', icon: User },
-  { to: '/admin', label: 'Admin panel', icon: Shield, adminOnly: true },
 ]
 
 // Mirrors AdminNav.jsx's grouping — the admin section's navigation lives
@@ -73,7 +71,7 @@ const ADMIN_NAV_GROUPS = [
   },
 ]
 
-function NavItem({ to, label, icon: Icon, adminOnly, collapsed, end }) {
+function NavItem({ to, label, icon: Icon, collapsed, end }) {
   return (
     <NavLink
       to={to}
@@ -82,11 +80,7 @@ function NavItem({ to, label, icon: Icon, adminOnly, collapsed, end }) {
       className={({ isActive }) =>
         clsx(
           'flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors',
-          isActive
-            ? 'bg-accent/[0.14] text-accent'
-            : adminOnly
-              ? 'text-danger/80 hover:bg-danger-bg hover:text-danger'
-              : 'text-text hover:bg-border/40 hover:text-text-h'
+          isActive ? 'bg-accent/[0.14] text-accent' : 'text-text hover:bg-border/40 hover:text-text-h'
         )
       }
     >
@@ -98,15 +92,16 @@ function NavItem({ to, label, icon: Icon, adminOnly, collapsed, end }) {
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
-  const { user, logout, isAdminView } = useAuth()
+  const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
   // Inside the admin section, this sidebar switches to the grouped admin nav
   // instead of the regular customer-facing feature list — one sidebar, two
-  // modes, rather than two nav columns showing at once.
+  // modes, rather than two nav columns showing at once. AdminRoute already
+  // guarantees only an admin in admin-view mode ever renders with
+  // inAdminSection true, so no extra role/view check is needed here.
   const inAdminSection = location.pathname.startsWith('/admin')
-  const visibleNav = NAV_ITEMS.filter((item) => !item.adminOnly || isAdminView)
 
   function handleLogout() {
     logout()
@@ -141,7 +136,7 @@ export default function Sidebar() {
         </nav>
       ) : (
         <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2" aria-label="Main">
-          {visibleNav.map((item) => (
+          {NAV_ITEMS.map((item) => (
             <NavItem key={item.to} {...item} collapsed={collapsed} />
           ))}
         </nav>
