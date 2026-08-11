@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   CircleCheck,
+  CircleX,
   Circle,
   ExternalLink,
   Flag,
@@ -15,9 +16,16 @@ import {
   Sparkles,
   FolderKanban,
   Dumbbell,
+  GraduationCap,
+  HelpCircle,
+  MessageCircle,
+  Play,
+  BookOpen,
+  FileText,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useLearningRoadmap, useToggleRoadmapTopic, useRegenerateRoadmap } from '../hooks/useLearningRoadmap'
+import { useCareerCoachContext } from '../coach/CareerCoachContext'
 import Card from '../components/ui/Card'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
@@ -25,6 +33,12 @@ import Spinner from '../components/ui/Spinner'
 import ErrorState from '../components/ui/ErrorState'
 import EmptyState from '../components/ui/EmptyState'
 import { useToast } from '../components/ui/Toast'
+
+const MILESTONE_LEVELS = [
+  { key: 'beginner', label: 'Beginner' },
+  { key: 'intermediate', label: 'Intermediate' },
+  { key: 'advanced', label: 'Advanced' },
+]
 
 const PRIORITY_TONE = {
   critical: 'danger',
@@ -57,7 +71,101 @@ function SourceBadge({ source }) {
   return <Badge tone="neutral">Rule-based</Badge>
 }
 
-function TopicRow({ topic, onToggle, isToggling }) {
+function MilestoneTrack({ milestones }) {
+  if (!milestones) return null
+  return (
+    <div>
+      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">
+        <GraduationCap size={12} aria-hidden="true" /> Milestones
+      </p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {MILESTONE_LEVELS.map(({ key, label }) => (
+          <div key={key} className="rounded-lg bg-surface p-2.5">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-accent">{label}</p>
+            <p className="text-xs text-text-h">{milestones[key]}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function QuizQuestion({ question, index }) {
+  const [selected, setSelected] = useState(null)
+  const isAnswered = selected !== null
+  const isCorrect = selected === question.correct_index
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <p className="mb-2 text-sm font-medium text-text-h">
+        {index + 1}. {question.question}
+      </p>
+      <div className="flex flex-col gap-1.5">
+        {question.options.map((option, optionIndex) => {
+          const isSelected = selected === optionIndex
+          const isRightAnswer = optionIndex === question.correct_index
+          return (
+            <button
+              key={optionIndex}
+              type="button"
+              onClick={() => !isAnswered && setSelected(optionIndex)}
+              disabled={isAnswered}
+              className={clsx(
+                'rounded-md border px-3 py-1.5 text-left text-sm transition-colors disabled:cursor-default',
+                !isAnswered && 'border-border hover:border-accent hover:bg-accent/5',
+                isAnswered && isRightAnswer && 'border-success bg-success-bg text-success',
+                isAnswered && isSelected && !isRightAnswer && 'border-danger bg-danger-bg text-danger',
+                isAnswered && !isSelected && !isRightAnswer && 'border-border text-text/50'
+              )}
+            >
+              {option}
+            </button>
+          )
+        })}
+      </div>
+      {isAnswered && (
+        <p className={clsx('mt-2 flex items-start gap-1.5 text-xs', isCorrect ? 'text-success' : 'text-danger')}>
+          {isCorrect ? (
+            <CircleCheck size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+          ) : (
+            <CircleX size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+          )}
+          <span>{question.explanation}</span>
+        </p>
+      )}
+    </div>
+  )
+}
+
+function RecommendedResourceLinks({ links }) {
+  if (!links) return null
+  const buttons = [
+    { url: links.youtubeUrl, label: 'Watch YouTube Tutorial', icon: Play },
+    { url: links.courseUrl, label: 'Take Online Course', icon: BookOpen },
+    { url: links.docsUrl, label: 'Read Documentation', icon: FileText },
+  ].filter((entry) => entry.url)
+
+  if (buttons.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-1.5" onClick={(event) => event.stopPropagation()}>
+      {buttons.map(({ url, label, icon: Icon }) => (
+        <a
+          key={label}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-h transition-colors hover:border-accent hover:text-accent"
+        >
+          <Icon size={12} aria-hidden="true" />
+          {label}
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function TopicRow({ topic, onToggle, isToggling, onAskCoach }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -73,27 +181,35 @@ function TopicRow({ topic, onToggle, isToggling }) {
           {topic.done ? <CircleCheck size={20} className="text-success" aria-hidden="true" /> : <Circle size={20} aria-hidden="true" />}
         </button>
 
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          aria-expanded={expanded}
-          className="flex flex-1 items-center justify-between gap-3 text-left"
-        >
-          <div>
-            <p className={clsx('font-medium text-text-h', topic.done && 'text-text/50 line-through')}>{topic.title}</p>
-            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-text">
-              <Badge tone={PRIORITY_TONE[topic.priority] || 'neutral'} className="!text-[10px]">
-                {topic.priority}
-              </Badge>
-              {topic.estimated_hours}h estimated
-            </p>
+        <div className="flex-1">
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <div>
+              <p className={clsx('font-medium text-text-h', topic.done && 'text-text/50 line-through')}>{topic.title}</p>
+              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-text">
+                <Badge tone={PRIORITY_TONE[topic.priority] || 'neutral'} className="!text-[10px]">
+                  {topic.priority}
+                </Badge>
+                {topic.estimated_hours}h estimated
+              </p>
+            </div>
+            {expanded ? (
+              <ChevronUp size={16} className="shrink-0 text-text" aria-hidden="true" />
+            ) : (
+              <ChevronDown size={16} className="shrink-0 text-text" aria-hidden="true" />
+            )}
+          </button>
+
+          {topic.current_gap && <p className="mt-1.5 text-xs text-text">{topic.current_gap}</p>}
+
+          <div className="mt-2">
+            <RecommendedResourceLinks links={topic.resource_links} />
           </div>
-          {expanded ? (
-            <ChevronUp size={16} className="shrink-0 text-text" aria-hidden="true" />
-          ) : (
-            <ChevronDown size={16} className="shrink-0 text-text" aria-hidden="true" />
-          )}
-        </button>
+        </div>
       </div>
 
       {expanded && (
@@ -109,8 +225,10 @@ function TopicRow({ topic, onToggle, isToggling }) {
             </ul>
           </div>
 
+          <MilestoneTrack milestones={topic.milestones} />
+
           <div>
-            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">Resources</p>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">More resources</p>
             <ul className="flex flex-col gap-1.5">
               {topic.resources.map((resource, index) => (
                 <li key={index} className="flex items-start gap-1.5 text-sm text-text">
@@ -145,13 +263,32 @@ function TopicRow({ topic, onToggle, isToggling }) {
               </ul>
             </div>
           </div>
+
+          {topic.quiz && topic.quiz.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">
+                <HelpCircle size={12} aria-hidden="true" /> Self-check quiz
+              </p>
+              <div className="flex flex-col gap-2">
+                {topic.quiz.map((question, index) => (
+                  <QuizQuestion key={index} question={question} index={index} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {onAskCoach && (
+            <Button variant="secondary" size="sm" className="w-fit" onClick={() => onAskCoach(topic)}>
+              <MessageCircle size={14} aria-hidden="true" /> Ask the Coach about this topic
+            </Button>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-function StageCard({ stage, onToggleTopic, isToggling }) {
+function StageCard({ stage, onToggleTopic, isToggling, onAskCoach }) {
   const doneCount = stage.topics.filter((t) => t.done).length
 
   return (
@@ -174,7 +311,13 @@ function StageCard({ stage, onToggleTopic, isToggling }) {
       </div>
       <div>
         {stage.topics.map((topic) => (
-          <TopicRow key={topic.topic_key} topic={topic} onToggle={onToggleTopic} isToggling={isToggling} />
+          <TopicRow
+            key={topic.topic_key}
+            topic={topic}
+            onToggle={onToggleTopic}
+            isToggling={isToggling}
+            onAskCoach={onAskCoach}
+          />
         ))}
       </div>
     </Card>
@@ -185,6 +328,7 @@ export default function LearningRoadmapPage() {
   const { data, isLoading, isError, error, refetch } = useLearningRoadmap()
   const toggleMutation = useToggleRoadmapTopic()
   const regenerateMutation = useRegenerateRoadmap()
+  const { openCoach } = useCareerCoachContext()
   const { showToast } = useToast()
 
   async function handleRegenerate() {
@@ -254,10 +398,16 @@ export default function LearningRoadmapPage() {
             )}
           </p>
         </div>
-        <Button variant="secondary" size="sm" onClick={handleRegenerate} isLoading={regenerateMutation.isPending}>
-          <RotateCcw size={14} aria-hidden="true" />
-          Regenerate roadmap
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => openCoach(null)}>
+            <MessageCircle size={14} aria-hidden="true" />
+            AI Career Coach
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleRegenerate} isLoading={regenerateMutation.isPending}>
+            <RotateCcw size={14} aria-hidden="true" />
+            Regenerate roadmap
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -284,6 +434,7 @@ export default function LearningRoadmapPage() {
           stage={stage}
           onToggleTopic={(topicKey) => toggleMutation.mutate({ topicKey })}
           isToggling={toggleMutation.isPending}
+          onAskCoach={openCoach}
         />
       ))}
     </div>

@@ -139,7 +139,7 @@ describe('useSpeechVoice — supported browser (mocked Web Speech API)', () => {
     expect(result.current.isListening).toBe(false)
   })
 
-  it('does not call onFinalTranscript when nothing was transcribed', () => {
+  it('does not call onFinalTranscript when nothing was transcribed, and surfaces a message instead', () => {
     const { result } = renderHook(() => useSpeechVoice())
     const onFinalTranscript = vi.fn()
 
@@ -151,6 +151,25 @@ describe('useSpeechVoice — supported browser (mocked Web Speech API)', () => {
     })
 
     expect(onFinalTranscript).not.toHaveBeenCalled()
+    expect(result.current.recognitionError).toMatch(/no speech was detected/i)
+  })
+
+  it('onerror rescues a partial transcript instead of discarding real speech', () => {
+    const { result } = renderHook(() => useSpeechVoice())
+    const onFinalTranscript = vi.fn()
+
+    act(() => {
+      result.current.startListening(() => {}, onFinalTranscript)
+    })
+    const recognition = recognitionInstances[0]
+
+    act(() => {
+      recognition.onresult({ results: [[{ transcript: 'I led a team of five engineers' }]] })
+      recognition.onerror({ error: 'network' })
+    })
+
+    expect(onFinalTranscript).toHaveBeenCalledWith('I led a team of five engineers')
+    expect(result.current.recognitionError).toBe(null)
   })
 
   it('does not construct a second recognition instance while already listening', () => {
@@ -227,5 +246,69 @@ describe('useSpeechVoice — supported browser (mocked Web Speech API)', () => {
       result.current.startListening(() => {})
     })
     expect(result.current.recognitionError).toBe(null)
+  })
+})
+
+describe('useSpeechVoice — explicit microphone permission check', () => {
+  beforeEach(() => {
+    function FakeRecognition() {
+      this.start = vi.fn()
+      this.stop = vi.fn(() => this.onend?.())
+    }
+    global.window.SpeechRecognition = FakeRecognition
+  })
+
+  afterEach(() => {
+    cleanup()
+    delete global.window.SpeechRecognition
+    delete global.navigator.mediaDevices
+    vi.restoreAllMocks()
+  })
+
+  it('checks mic permission via getUserMedia before starting recognition, and releases the probe stream', async () => {
+    const stopTrack = vi.fn()
+    const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [{ stop: stopTrack }] })
+    Object.defineProperty(global.navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
+
+    const { result } = renderHook(() => useSpeechVoice())
+
+    await act(async () => {
+      await result.current.startListening(() => {})
+    })
+
+    expect(getUserMedia).toHaveBeenCalledWith({ audio: true })
+    expect(stopTrack).toHaveBeenCalled()
+    expect(result.current.isListening).toBe(true)
+    expect(result.current.recognitionError).toBe(null)
+  })
+
+  it('surfaces a specific message when the OS/browser blocks mic access, and never starts recognition', async () => {
+    const deniedError = Object.assign(new Error('denied'), { name: 'NotAllowedError' })
+    const getUserMedia = vi.fn().mockRejectedValue(deniedError)
+    Object.defineProperty(global.navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
+
+    const { result } = renderHook(() => useSpeechVoice())
+
+    await act(async () => {
+      await result.current.startListening(() => {})
+    })
+
+    expect(result.current.isListening).toBe(false)
+    expect(result.current.recognitionError).toMatch(/microphone access is blocked/i)
+    expect(result.current.recognitionError).toMatch(/operating system/i)
+  })
+
+  it('reports a clear message when no microphone device exists', async () => {
+    const notFoundError = Object.assign(new Error('not found'), { name: 'NotFoundError' })
+    const getUserMedia = vi.fn().mockRejectedValue(notFoundError)
+    Object.defineProperty(global.navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
+
+    const { result } = renderHook(() => useSpeechVoice())
+
+    await act(async () => {
+      await result.current.startListening(() => {})
+    })
+
+    expect(result.current.recognitionError).toMatch(/no microphone was found/i)
   })
 })

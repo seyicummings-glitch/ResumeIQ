@@ -1,7 +1,15 @@
 import { apiRequest } from './client'
 
-export async function getUsers() {
-  return apiRequest('/admin/users', { auth: true })
+export async function getDashboard() {
+  return apiRequest('/admin/dashboard', { auth: true })
+}
+
+export async function getUsersPage({ page = 1, pageSize = 20, search, status, role } = {}) {
+  return apiRequest('/admin/users', { auth: true, query: { page, pageSize, search, status, role } })
+}
+
+export async function getUserDetail(id) {
+  return apiRequest(`/admin/users/${id}`, { auth: true })
 }
 
 export async function updateUser(id, fields) {
@@ -10,6 +18,10 @@ export async function updateUser(id, fields) {
 
 export function setUserStatus(id, status) {
   return apiRequest(`/admin/users/${id}/status`, { method: 'PATCH', body: { status }, auth: true })
+}
+
+export async function deleteUser(id) {
+  return apiRequest(`/admin/users/${id}`, { method: 'DELETE', auth: true })
 }
 
 export async function getReports() {

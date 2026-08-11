@@ -4,6 +4,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { useTheme } from '../../theme/ThemeContext'
 import SkipToContentLink from './SkipToContentLink'
 import Sidebar, { NAV_ITEMS } from './Sidebar'
+import GlobalCareerCoach from '../coach/GlobalCareerCoach'
 
 export default function AppShell() {
   const { user } = useAuth()
@@ -48,10 +49,11 @@ export default function AppShell() {
             </div>
           </div>
         </header>
-        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
+        <main id="main-content" tabIndex={-1} className="w-full flex-1 px-6 py-8">
           <Outlet />
         </main>
       </div>
+      <GlobalCareerCoach />
     </div>
   )
 }

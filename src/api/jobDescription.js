@@ -4,6 +4,7 @@ export const ALLOWED_JD_FILE_EXTENSIONS = ['.pdf', '.docx', '.txt']
 
 /**
  * @typedef {Object} JobDescriptionAnalysis
+ * @property {string} title - the job title, AI-extracted from the posting; empty string if not found
  * @property {string[]} required_skills
  * @property {string} experience_level - e.g. "3+ years" or "Not specified"
  * @property {string[]} qualifications

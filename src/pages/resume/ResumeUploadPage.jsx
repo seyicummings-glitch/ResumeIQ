@@ -13,6 +13,7 @@ import Button from '../../components/ui/Button'
 import Card from '../../components/ui/Card'
 import TextArea from '../../components/ui/TextArea'
 import Input from '../../components/ui/Input'
+import Modal from '../../components/ui/Modal'
 import ErrorState from '../../components/ui/ErrorState'
 import { useToast } from '../../components/ui/Toast'
 
@@ -47,6 +48,10 @@ export default function ResumeUploadPage() {
   const { draft, updateDraft } = useResumeDraft()
   const { file, jdTab, jobDescription, jdFile, jdUrl, experienceLevel, githubUsername } = draft
   const [stage, setStage] = useState('idle')
+  const [resolvingTitle, setResolvingTitle] = useState(false)
+  const [showTitleModal, setShowTitleModal] = useState(false)
+  const [manualTitle, setManualTitle] = useState('')
+  const [resolvedTitle, setResolvedTitle] = useState('')
 
   const jdExtractMutation = useMutation({
     mutationFn: (overrideFile) => (jdTab === 'file' ? jdApi.parseFile(overrideFile ?? jdFile) : jdApi.parseUrl(jdUrl)),
@@ -65,14 +70,14 @@ export default function ResumeUploadPage() {
   }
 
   const analyzeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (jobTitle) => {
       setStage('saving')
       const atsResponse = await resumeApi.getAtsScore(file)
       const detectedGithub = atsResponse.contact_info?.github || null
       updateDraft({ githubUsername: detectedGithub })
 
       const savedResume = await resumeApi.saveResume(file)
-      const savedJd = await jdApi.saveJobDescription({ title: undefined, content: jobDescription })
+      const savedJd = await jdApi.saveJobDescription({ title: jobTitle || undefined, content: jobDescription })
 
       setStage('matching')
       const savedAnalysis = await matchingApi.saveAnalysis({
@@ -96,14 +101,57 @@ export default function ResumeUploadPage() {
     setStage('idle')
   }
 
-  const isAnalyzing = analyzeMutation.isPending
+  /**
+   * Resolves a job title before saving: reuses the title the AI already extracted while
+   * parsing the file/URL (jdExtractMutation), or — for pasted text, which is never run
+   * through an extraction call otherwise — parses the current text fresh. If neither finds
+   * a real title, the user is prompted to type one rather than silently saving an
+   * "Untitled job description".
+   */
+  async function handleAnalyzeClick() {
+    setResolvingTitle(true)
+    try {
+      let title = ''
+      if ((jdTab === 'file' || jdTab === 'url') && jdExtractMutation.isSuccess) {
+        title = jdExtractMutation.data?.job_description_analysis?.title || ''
+      }
+      if (!title) {
+        const parsed = await jdApi.parseText(jobDescription)
+        title = parsed.job_description_analysis?.title || ''
+      }
+
+      if (title) {
+        setResolvedTitle(title)
+        analyzeMutation.mutate(title)
+      } else {
+        setManualTitle('')
+        setShowTitleModal(true)
+      }
+    } catch {
+      // Title extraction failing shouldn't block analysis — fall back to asking the user.
+      setManualTitle('')
+      setShowTitleModal(true)
+    } finally {
+      setResolvingTitle(false)
+    }
+  }
+
+  function handleManualTitleSubmit(event) {
+    event.preventDefault()
+    const finalTitle = manualTitle.trim()
+    setResolvedTitle(finalTitle)
+    setShowTitleModal(false)
+    analyzeMutation.mutate(finalTitle)
+  }
+
+  const isAnalyzing = analyzeMutation.isPending || resolvingTitle
   const canAnalyze = Boolean(file) && jobDescription.trim().length > 0 && isAuthenticated && !isAnalyzing
 
   const wordCount = jobDescription.trim() ? jobDescription.trim().split(/\s+/).length : 0
   const jdWasAiExtracted = jdExtractMutation.isSuccess && jdExtractMutation.data.source === 'ai'
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 py-8">
+    <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
       <div>
         <h1 className="text-2xl font-semibold text-text-h">Analyze Resume</h1>
         <p className="mt-1 text-sm text-text">
@@ -246,18 +294,18 @@ export default function ResumeUploadPage() {
         <Card className="flex flex-col gap-2 p-4">
           <div className="flex items-center gap-2 font-mono text-sm text-accent">
             <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
-            {STAGE_LABELS[stage] || STAGE_LABELS.saving}
+            {resolvingTitle ? 'Detecting the job title…' : STAGE_LABELS[stage] || STAGE_LABELS.saving}
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-border">
             <div
               className="h-full rounded-full bg-accent transition-all duration-500"
-              style={{ width: stage === 'done' ? '100%' : stage === 'matching' ? '65%' : '25%' }}
+              style={{ width: resolvingTitle ? '10%' : stage === 'done' ? '100%' : stage === 'matching' ? '65%' : '25%' }}
             />
           </div>
         </Card>
       ) : (
         <div>
-          <Button onClick={() => analyzeMutation.mutate()} disabled={!canAnalyze}>
+          <Button onClick={handleAnalyzeClick} disabled={!canAnalyze}>
             <Sparkles size={15} aria-hidden="true" /> Analyze Resume
           </Button>
           {!isAuthenticated && (
@@ -275,7 +323,33 @@ export default function ResumeUploadPage() {
         </div>
       )}
 
-      {analyzeMutation.isError && <ErrorState message={analyzeMutation.error.message} onRetry={() => analyzeMutation.mutate()} />}
+      {analyzeMutation.isError && (
+        <ErrorState message={analyzeMutation.error.message} onRetry={() => analyzeMutation.mutate(resolvedTitle)} />
+      )}
+
+      <Modal isOpen={showTitleModal} onClose={() => setShowTitleModal(false)} title="What's this job called?">
+        <form onSubmit={handleManualTitleSubmit} className="flex flex-col gap-4">
+          <p className="text-sm text-text">
+            We couldn't automatically detect a job title from this posting — enter one so it's easy to find later.
+          </p>
+          <Input
+            label="Job title"
+            autoFocus
+            value={manualTitle}
+            onChange={(event) => setManualTitle(event.target.value)}
+            placeholder="e.g. Backend Developer"
+            required
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setShowTitleModal(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!manualTitle.trim()}>
+              Continue
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

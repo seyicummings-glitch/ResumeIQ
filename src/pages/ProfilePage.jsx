@@ -291,7 +291,7 @@ export default function ProfilePage() {
   const initial = displayName[0].toUpperCase()
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 py-8">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 py-8">
       <Card className="flex flex-col items-center gap-4 p-8 text-center sm:flex-row sm:items-center sm:text-left">
         <div
           className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-xl font-bold text-white"

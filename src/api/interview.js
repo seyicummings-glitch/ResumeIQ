@@ -54,8 +54,13 @@ export function sendInterviewMessage({ conversation, preferredLanguage }) {
 /**
  * @typedef {Object} InterviewFeedback
  * @property {string} overall_assessment
+ * @property {number|null} overall_score - 0-100, or null when no AI was available to grade it
+ * @property {string} technical_performance
+ * @property {string} communication_assessment
+ * @property {string} confidence_assessment
  * @property {string[]} strengths
  * @property {string[]} areas_to_improve
+ * @property {string[]} recommended_improvements
  * @property {string[]} study_topics
  * @property {string[]} role_knowledge_tips
  * @property {'ai'|'fallback'} source

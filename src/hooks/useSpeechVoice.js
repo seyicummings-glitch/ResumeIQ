@@ -17,6 +17,20 @@ const RECOGNITION_ERROR_MESSAGES = {
   default: 'Something went wrong with speech recognition. Try again, or switch to text.',
 }
 
+// getUserMedia rejects with a specific, named error — unlike SpeechRecognition's own error
+// event, which often reports an unhelpful generic "no-speech" when the real cause is that the
+// OS or browser silently blocked mic access before any audio could ever reach the recognizer.
+// Checking permission explicitly first lets us tell the user the *actual* problem.
+const MEDIA_ERROR_MESSAGES = {
+  NotAllowedError:
+    "Microphone access is blocked. Check your browser's site permissions for this page AND your operating system's microphone privacy settings, then try again.",
+  PermissionDeniedError:
+    "Microphone access is blocked. Check your browser's site permissions for this page AND your operating system's microphone privacy settings, then try again.",
+  NotFoundError: 'No microphone was found on this device. Connect one and try again.',
+  NotReadableError: 'Your microphone is being used by another app, or is not accessible right now. Close other apps using it and try again.',
+  default: 'Could not access your microphone. Check your browser and system microphone permissions.',
+}
+
 /**
  * Thin wrapper around the browser's native Web Speech API — no backend, no API cost.
  * Speech-to-text (SpeechRecognition) has real support only in Chromium-based browsers;
@@ -75,16 +89,34 @@ export function useSpeechVoice() {
    * what the UI already tells them to do.
    */
   const startListening = useCallback(
-    (onTranscriptUpdate, onFinalTranscript) => {
+    async (onTranscriptUpdate, onFinalTranscript) => {
       const SpeechRecognitionCtor = getSpeechRecognitionCtor()
       if (!SpeechRecognitionCtor || isListening) return
+
+      setRecognitionError(null)
+
+      // Confirm mic access explicitly before handing off to SpeechRecognition.
+      // recognition.start() also implicitly requests mic access, but its own error event
+      // often can't tell "the OS/browser silently blocked the mic" apart from "genuinely
+      // heard nothing" — both can surface as a generic "no-speech" error, which is exactly
+      // the confusing symptom of a real permission problem. getUserMedia rejects with a
+      // specific, named error instead, so this catches the real cause up front.
+      if (navigator.mediaDevices?.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          stream.getTracks().forEach((track) => track.stop())
+        } catch (err) {
+          setRecognitionError(MEDIA_ERROR_MESSAGES[err.name] || MEDIA_ERROR_MESSAGES.default)
+          return
+        }
+      }
+
       const recognition = new SpeechRecognitionCtor()
       recognition.lang = navigator.language || 'en-US'
       recognition.interimResults = true
       recognition.continuous = true
 
       lastTranscriptRef.current = ''
-      setRecognitionError(null)
 
       recognition.onresult = (event) => {
         const transcript = Array.from(event.results)
@@ -96,13 +128,37 @@ export function useSpeechVoice() {
       recognition.onend = () => {
         setIsListening(false)
         const transcript = lastTranscriptRef.current.trim()
-        if (transcript) onFinalTranscript?.(transcript)
+        // A transcript here only ever hands off to the caller for review — it is never
+        // auto-submitted by this hook. That matters because raw speech-to-text can be
+        // incomplete or mis-heard (accents, background noise, a pause mid-thought); the
+        // caller shows it back to the user to confirm or edit rather than sending it
+        // straight to the AI, which is what used to produce a confusing "I didn't get an
+        // answer" reply from the AI even when the user genuinely had spoken.
+        if (transcript) {
+          onFinalTranscript?.(transcript)
+        } else {
+          // Recognition ended with literally nothing captured (e.g. it decided the mic
+          // was silent) but didn't fire a formal error event — show the same message a
+          // real "no-speech" error would, instead of silently doing nothing and leaving
+          // the user unsure whether they were heard at all.
+          setRecognitionError(RECOGNITION_ERROR_MESSAGES['no-speech'])
+        }
       }
       recognition.onerror = (event) => {
         setIsListening(false)
         // "aborted" is what fires when the user (or our own code) intentionally
         // stops recognition — not a real failure, so it shouldn't show an error.
         if (event.error === 'aborted') return
+
+        // Some speech was already captured before this error interrupted recognition
+        // (e.g. a transient "network" hiccup partway through an answer) — hand off what
+        // was heard so far for the user to review/finish, rather than discarding real
+        // speech just because the session didn't end cleanly.
+        const partial = lastTranscriptRef.current.trim()
+        if (partial) {
+          onFinalTranscript?.(partial)
+          return
+        }
         setRecognitionError(RECOGNITION_ERROR_MESSAGES[event.error] || RECOGNITION_ERROR_MESSAGES.default)
       }
 

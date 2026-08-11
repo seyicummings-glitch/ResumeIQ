@@ -15,12 +15,15 @@ import {
   Lightbulb,
   LoaderCircle,
   Send,
+  X,
+  Target,
 } from 'lucide-react'
 import { useInterviewQuestions, useInterviewChat, useSaveInterviewSession } from '../hooks/useInterviewQuestions'
 import { useSpeechVoice } from '../hooks/useSpeechVoice'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
+import ScoreBadge from '../components/ui/ScoreBadge'
 import Spinner from '../components/ui/Spinner'
 import ErrorState from '../components/ui/ErrorState'
 import EmptyState from '../components/ui/EmptyState'
@@ -42,22 +45,46 @@ function FeedbackSection({ icon: Icon, title, items }) {
   )
 }
 
+function AssessmentCard({ title, text }) {
+  if (!text) return null
+  return (
+    <div className="rounded-lg bg-surface p-3">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text/70">{title}</p>
+      <p className="text-sm text-text-h">{text}</p>
+    </div>
+  )
+}
+
 function SessionReport({ sessionResult }) {
   const { feedback } = sessionResult
   return (
     <Card className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-base font-semibold text-text-h">Interview feedback</h2>
         <Badge tone={feedback.source === 'ai' ? 'accent' : 'neutral'}>
           {feedback.source === 'ai' ? 'AI-generated' : 'Rule-based fallback'}
         </Badge>
+        {typeof feedback.overall_score === 'number' ? (
+          <ScoreBadge score={feedback.overall_score} className="ml-auto" />
+        ) : (
+          <Badge tone="neutral" className="ml-auto">
+            Not scored
+          </Badge>
+        )}
       </div>
 
       <p className="text-sm text-text-h">{feedback.overall_assessment}</p>
 
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <AssessmentCard title="Technical performance" text={feedback.technical_performance} />
+        <AssessmentCard title="Communication" text={feedback.communication_assessment} />
+        <AssessmentCard title="Confidence" text={feedback.confidence_assessment} />
+      </div>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FeedbackSection icon={ThumbsUp} title="Strengths" items={feedback.strengths} />
         <FeedbackSection icon={ListChecks} title="Areas to improve" items={feedback.areas_to_improve} />
+        <FeedbackSection icon={Target} title="Recommended improvements" items={feedback.recommended_improvements} />
         <FeedbackSection icon={BookOpen} title="Study topics" items={feedback.study_topics} />
         <FeedbackSection icon={Lightbulb} title="Role knowledge tips" items={feedback.role_knowledge_tips} />
       </div>
@@ -234,6 +261,16 @@ export default function InterviewPracticePage() {
     submitAnswer(value)
   }
 
+  // Voice answers are never auto-submitted — the transcript lands in the same editable
+  // box text mode uses, so the candidate can confirm or fix it (misheard words, a cut-off
+  // sentence) before it's actually sent. This also means a genuinely-empty transcript can
+  // no longer read as a confusing "the AI ignored my answer" — it either becomes reviewable
+  // text, or a clear "didn't catch that" message shows (see useSpeechVoice's onend/onerror).
+  function handleVoiceFinalTranscript(transcript) {
+    setInterimTranscript('')
+    setTextAnswer(transcript)
+  }
+
   function toggleMic() {
     if (voice.isListening) {
       voice.stopListening()
@@ -241,7 +278,7 @@ export default function InterviewPracticePage() {
     }
     voice.stopSpeaking()
     setInterimTranscript('')
-    voice.startListening(setInterimTranscript, submitAnswer)
+    voice.startListening(setInterimTranscript, handleVoiceFinalTranscript)
   }
 
   function toggleVoiceOutput() {
@@ -283,7 +320,7 @@ export default function InterviewPracticePage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-9rem)] max-w-2xl flex-col gap-4 py-8">
+    <div className="mx-auto flex h-[calc(100vh-9rem)] max-w-3xl flex-col gap-4 py-8">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-text-h">Interview practice</h1>
@@ -325,8 +362,9 @@ export default function InterviewPracticePage() {
             <h2 className="text-lg font-semibold text-text-h">Ready when you are</h2>
             <p className="mx-auto mt-1 max-w-sm text-sm text-text">
               You'll get one question at a time, just like talking with a real interviewer — answer by typing or,
-              if your browser supports it, by speaking into your mic, and switch between the two whenever you like.
-              After each answer you'll get direct feedback on it, and a full report when you finish.
+              if your browser supports it, by speaking into your mic (you'll get to review and edit the
+              transcript before it's sent), and switch between the two whenever you like. After each answer
+              you'll get direct feedback on it, and a full report when you finish.
             </p>
           </div>
           <Button onClick={startInterview} isLoading={chat.isPending}>
@@ -449,14 +487,41 @@ export default function InterviewPracticePage() {
                 onClick={toggleMic}
                 disabled={chat.isPending || voice.isSpeaking}
                 className="h-16 w-16 !rounded-full"
-                title={voice.isListening ? 'Stop and send' : 'Tap to answer'}
+                title={voice.isListening ? 'Stop and review' : 'Tap to answer'}
               >
                 {voice.isListening ? <MicOff size={22} aria-hidden="true" /> : <Mic size={22} aria-hidden="true" />}
               </Button>
               <p className="text-xs text-text/60">
-                {voice.isListening ? 'Tap again to stop and send your answer' : 'Tap to answer by voice'}
+                {voice.isListening ? 'Tap again to stop and review your answer' : 'Tap to answer by voice'}
               </p>
               {voice.recognitionError && <p className="text-center text-xs text-danger">{voice.recognitionError}</p>}
+
+              {textAnswer && !voice.isListening && (
+                <form onSubmit={handleTextSubmit} className="flex w-full items-center gap-2 rounded-lg border border-border bg-bg p-2">
+                  <input
+                    type="text"
+                    value={textAnswer}
+                    onChange={(event) => setTextAnswer(event.target.value)}
+                    placeholder="Review or edit your transcribed answer…"
+                    disabled={chat.isPending}
+                    autoFocus
+                    className="flex-1 bg-transparent px-2 py-2 text-sm text-text-h placeholder:text-text/50 focus:outline-none disabled:opacity-50"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="md"
+                    onClick={() => setTextAnswer('')}
+                    disabled={chat.isPending}
+                    title="Discard this answer"
+                  >
+                    <X size={16} aria-hidden="true" />
+                  </Button>
+                  <Button type="submit" size="md" disabled={!textAnswer.trim() || chat.isPending} title="Send">
+                    <Send size={16} aria-hidden="true" />
+                  </Button>
+                </form>
+              )}
             </div>
           )}
         </>

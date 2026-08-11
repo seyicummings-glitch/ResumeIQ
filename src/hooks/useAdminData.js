@@ -1,8 +1,24 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import * as adminApi from '../api/admin'
 
-export function useAdminUsers() {
-  return useQuery({ queryKey: ['admin', 'users'], queryFn: adminApi.getUsers })
+export function useAdminDashboard() {
+  return useQuery({ queryKey: ['admin', 'dashboard'], queryFn: adminApi.getDashboard })
+}
+
+export function useAdminUsersPage(params) {
+  return useQuery({
+    queryKey: ['admin', 'users', params],
+    queryFn: () => adminApi.getUsersPage(params),
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useAdminUserDetail(id) {
+  return useQuery({
+    queryKey: ['admin', 'users', 'detail', id],
+    queryFn: () => adminApi.getUserDetail(id),
+    enabled: id != null,
+  })
 }
 
 export function useSetUserStatus() {
@@ -17,6 +33,14 @@ export function useUpdateUser() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, fields }) => adminApi.updateUser(id, fields),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  })
+}
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => adminApi.deleteUser(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }),
   })
 }

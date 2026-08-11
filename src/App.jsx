@@ -15,13 +15,16 @@ import ResumeUploadPage from './pages/resume/ResumeUploadPage'
 import DashboardPage from './pages/DashboardPage'
 import HistoryPage from './pages/HistoryPage'
 import AnalysisResultsPage from './pages/AnalysisResultsPage'
-import DocumentsPage from './pages/DocumentsPage'
 import SkillAssessmentPage from './pages/SkillAssessmentPage'
 import InterviewPracticePage from './pages/InterviewPracticePage'
 import LearningRoadmapPage from './pages/LearningRoadmapPage'
 import ResumeBuilderPage from './pages/ResumeBuilderPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
+import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import AdminUsersPage from './pages/admin/AdminUsersPage'
+import AdminUserDetailPage from './pages/admin/AdminUserDetailPage'
+import AdminPlansPage from './pages/admin/AdminPlansPage'
+import AdminSkillResourcesPage from './pages/admin/AdminSkillResourcesPage'
 import AdminReportsPage from './pages/admin/AdminReportsPage'
 import AdminAnalyticsPage from './pages/admin/AdminAnalyticsPage'
 import AdminSettingsPage from './pages/admin/AdminSettingsPage'
@@ -50,7 +53,6 @@ export default function App() {
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/analysis-results" element={<AnalysisResultsPage />} />
           <Route path="/analysis-results/:id" element={<AnalysisResultsPage />} />
-          <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/skill-assessment" element={<SkillAssessmentPage />} />
           <Route path="/interview-practice" element={<InterviewPracticePage />} />
           <Route path="/roadmap" element={<LearningRoadmapPage />} />
@@ -61,7 +63,11 @@ export default function App() {
         {/* Admin */}
         <Route element={<AdminRoute />}>
           <Route element={<AdminNav />}>
+            <Route path="/admin" element={<AdminDashboardPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/users/:id" element={<AdminUserDetailPage />} />
+            <Route path="/admin/subscriptions/plans" element={<AdminPlansPage />} />
+            <Route path="/admin/skill-resources" element={<AdminSkillResourcesPage />} />
             <Route path="/admin/reports" element={<AdminReportsPage />} />
             <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
             <Route path="/admin/settings" element={<AdminSettingsPage />} />

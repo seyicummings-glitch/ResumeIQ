@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Send, Paperclip, Sparkles, FileText, Link2 } from 'lucide-react'
+import { Send, Paperclip, ImagePlus, FileUp, X, Sparkles, FileText, Link2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useResumes } from '../hooks/useResumes'
 import * as resumeApi from '../api/resume'
@@ -10,8 +10,23 @@ import { useResumeBuilderDraft } from '../resume/ResumeBuilderDraftContext'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
+import Spinner from '../components/ui/Spinner'
 
 const URL_PATTERN = /https?:\/\/[^\s]+/i
+
+const ATTACHMENT_ACCEPT = '.png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.txt'
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+/** Reads a File as a data URL (data:<mime>;base64,<payload>) — used both for the base64 payload
+ * the backend needs and, for images, directly as the local preview thumbnail's src. */
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error("Couldn't read that file."))
+    reader.readAsDataURL(file)
+  })
+}
 
 function Avatar({ isAssistant }) {
   if (isAssistant) {
@@ -32,18 +47,33 @@ function Avatar({ isAssistant }) {
   )
 }
 
-function ChatBubble({ role, content }) {
+function ChatBubble({ role, content, attachment }) {
   const isAssistant = role === 'assistant'
   return (
     <div className={clsx('flex items-end gap-2.5', !isAssistant && 'flex-row-reverse')}>
       <Avatar isAssistant={isAssistant} />
       <div
         className={clsx(
-          'max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed',
+          'flex max-w-[80%] flex-col gap-2 rounded-2xl px-4 py-2.5 text-sm leading-relaxed',
           isAssistant ? 'rounded-bl-sm bg-surface text-text-h' : 'rounded-br-sm bg-accent text-accent-contrast'
         )}
       >
-        {content}
+        {attachment && (
+          <div
+            className={clsx(
+              'flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs',
+              isAssistant ? 'bg-bg/60' : 'bg-black/10'
+            )}
+          >
+            {attachment.mimeType?.startsWith('image/') ? (
+              <ImagePlus size={13} className="shrink-0" aria-hidden="true" />
+            ) : (
+              <FileUp size={13} className="shrink-0" aria-hidden="true" />
+            )}
+            <span className="truncate">{attachment.filename}</span>
+          </div>
+        )}
+        {content && <span className="whitespace-pre-wrap">{content}</span>}
       </div>
     </div>
   )
@@ -124,28 +154,38 @@ export default function ResumeBuilderPage() {
   const chatMutation = useChatAboutResume()
   const uploadMutation = useUploadResumeForChat()
   const saveMutation = useSaveEnhancedResume()
-  const { state, updateState } = useResumeBuilderDraft()
+  const { state, updateState, hydrated } = useResumeBuilderDraft()
   const { messages, draft, jdContent, jdSourceUrl } = state
 
   const activeResume = resumes?.find((resume) => resume.is_active)
 
   const greeting = activeResume
-    ? `Hi! I can help you build or edit your resume. "${activeResume.filename}" is your currently active resume — tell me what you'd like to change, or attach a different file to start from that instead.`
-    : "Hi! I can help you build a resume from scratch or edit one you already have. Tell me about your background (target role, experience, skills), or attach an existing CV using the paperclip below."
+    ? `Hi! "${activeResume.filename}" is your currently active resume. Want me to review it and suggest improvements, tell me what to change, or attach a different file to start from that instead — whatever's easiest.`
+    : "Hi! Let's build your resume together — just tell me a bit about yourself (even something like \"help me build my resume\" works) and I'll ask what I need as we go. You can also attach an existing CV using the paperclip below to start from that."
   const displayMessages = messages.length === 0 ? [{ role: 'assistant', content: greeting }] : messages
 
   const [input, setInput] = useState('')
   const [chatError, setChatError] = useState(null)
   const [jdExtracting, setJdExtracting] = useState(false)
+  const [pendingAttachment, setPendingAttachment] = useState(null)
+  const [attachmentLoading, setAttachmentLoading] = useState(false)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
+  const attachmentInputRef = useRef(null)
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, chatMutation.isPending, uploadMutation.isPending, jdExtracting])
 
-  async function sendMessage(content, jdContentOverride) {
-    const nextMessages = [...messages, { role: 'user', content }]
+  async function sendMessage(content, jdContentOverride, attachment = null) {
+    const nextMessages = [
+      ...messages,
+      {
+        role: 'user',
+        content,
+        ...(attachment ? { attachment: { filename: attachment.filename, mimeType: attachment.mimeType } } : {}),
+      },
+    ]
     updateState({ messages: nextMessages })
     setChatError(null)
 
@@ -156,6 +196,7 @@ export default function ResumeBuilderPage() {
         currentExperienceBullets: draft?.experienceBullets || [],
         currentSkillsSection: draft?.skillsSection || '',
         jdContent: jdContentOverride ?? jdContent,
+        attachment,
       })
       updateState({
         messages: [...nextMessages, { role: 'assistant', content: result.reply, source: result.source }],
@@ -171,11 +212,46 @@ export default function ResumeBuilderPage() {
     }
   }
 
+  async function handleAttachmentSelected(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setChatError('That file is too large to attach (max 8MB).')
+      return
+    }
+
+    setChatError(null)
+    setAttachmentLoading(true)
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      const base64 = dataUrl.split(',')[1] || ''
+      setPendingAttachment({
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        dataBase64: base64,
+        previewUrl: file.type.startsWith('image/') ? dataUrl : null,
+      })
+    } catch (err) {
+      setChatError(err.message)
+    } finally {
+      setAttachmentLoading(false)
+    }
+  }
+
   async function handleSend(event) {
     event.preventDefault()
     const text = input.trim()
-    if (!text || chatMutation.isPending || jdExtracting) return
+    if ((!text && !pendingAttachment) || chatMutation.isPending || jdExtracting || attachmentLoading) return
     setInput('')
+
+    if (pendingAttachment) {
+      const attachment = pendingAttachment
+      setPendingAttachment(null)
+      await sendMessage(text, undefined, attachment)
+      return
+    }
 
     // The AI itself can't browse links, so a job posting URL needs to go
     // through the real extraction pipeline first — otherwise it just tells
@@ -251,13 +327,21 @@ export default function ResumeBuilderPage() {
     )
   }
 
-  const isBusy = chatMutation.isPending || uploadMutation.isPending || jdExtracting
+  const isBusy = chatMutation.isPending || uploadMutation.isPending || jdExtracting || attachmentLoading
   const lastAssistantMessage = [...messages].reverse().find((m) => m.role === 'assistant')
   const sourceLabel =
     lastAssistantMessage?.source === 'ai' ? 'AI-generated' : lastAssistantMessage?.source === 'fallback' ? 'AI unavailable' : null
 
+  if (!hydrated) {
+    return (
+      <div className="flex h-[calc(100vh-9rem)] items-center justify-center py-8">
+        <Spinner label="Loading your conversation…" />
+      </div>
+    )
+  }
+
   return (
-    <div className="mx-auto flex h-[calc(100vh-9rem)] max-w-6xl flex-col gap-4 py-8">
+    <div className="mx-auto flex h-[calc(100vh-9rem)] max-w-[100rem] flex-col gap-4 py-8">
       <div>
         <h1 className="text-2xl font-semibold text-text-h">AI Resume Builder</h1>
         <p className="mt-1 text-sm text-text">
@@ -276,7 +360,7 @@ export default function ResumeBuilderPage() {
 
           <div ref={scrollRef} className="flex flex-1 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-bg p-4">
             {displayMessages.map((message, index) => (
-              <ChatBubble key={index} role={message.role} content={message.content} />
+              <ChatBubble key={index} role={message.role} content={message.content} attachment={message.attachment} />
             ))}
             {jdExtracting && (
               <div className="flex items-center gap-2 text-xs text-text/60">
@@ -288,6 +372,27 @@ export default function ResumeBuilderPage() {
           </div>
 
           {chatError && <p className="text-sm text-danger">{chatError}</p>}
+
+          {pendingAttachment && (
+            <div className="flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2">
+              {pendingAttachment.previewUrl ? (
+                <img src={pendingAttachment.previewUrl} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
+              ) : (
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-bg text-text/60">
+                  <FileUp size={16} aria-hidden="true" />
+                </div>
+              )}
+              <span className="min-w-0 flex-1 truncate text-sm text-text-h">{pendingAttachment.filename}</span>
+              <button
+                type="button"
+                onClick={() => setPendingAttachment(null)}
+                aria-label="Remove attachment"
+                className="shrink-0 rounded-md p-1 text-text hover:bg-border/40"
+              >
+                <X size={15} aria-hidden="true" />
+              </button>
+            </div>
+          )}
 
           <form onSubmit={handleSend} className="flex items-end gap-2">
             <input
@@ -303,9 +408,26 @@ export default function ResumeBuilderPage() {
               onClick={() => fileInputRef.current?.click()}
               isLoading={uploadMutation.isPending}
               disabled={isBusy}
-              title="Attach a resume file"
+              title="Attach a resume file (sets your active resume)"
             >
               <Paperclip size={15} aria-hidden="true" />
+            </Button>
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              accept={ATTACHMENT_ACCEPT}
+              className="hidden"
+              onChange={handleAttachmentSelected}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => attachmentInputRef.current?.click()}
+              isLoading={attachmentLoading}
+              disabled={isBusy}
+              title="Attach an image, screenshot, PDF, or document to this message"
+            >
+              <ImagePlus size={15} aria-hidden="true" />
             </Button>
             <textarea
               rows={2}
@@ -316,11 +438,15 @@ export default function ResumeBuilderPage() {
                   handleSend(event)
                 }
               }}
-              placeholder="Tell the AI what to build, add, remove, or change…"
+              placeholder={
+                pendingAttachment
+                  ? 'Add a message about this file (optional)…'
+                  : 'Tell the AI what to build, add, remove, or change…'
+              }
               disabled={isBusy}
               className="flex-1 resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-h placeholder:text-text/50 focus:border-accent focus:outline-none disabled:opacity-50"
             />
-            <Button type="submit" disabled={isBusy || !input.trim()} isLoading={chatMutation.isPending}>
+            <Button type="submit" disabled={isBusy || (!input.trim() && !pendingAttachment)} isLoading={chatMutation.isPending}>
               <Send size={15} aria-hidden="true" />
             </Button>
           </form>

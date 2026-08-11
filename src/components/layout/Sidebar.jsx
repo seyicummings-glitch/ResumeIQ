@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Upload, Clock, User, Shield, LogOut, ChevronLeft, ChevronRight, FolderOpen, Brain, MessageSquare, Map, Sparkles, GitCompare, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, Upload, Clock, User, Shield, LogOut, ChevronLeft, ChevronRight, Brain, MessageSquare, Map, Sparkles, GitCompare, BarChart3 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../auth/AuthContext'
 import Logo from './Logo'
@@ -15,9 +15,8 @@ export const NAV_ITEMS = [
   { to: '/interview-practice', label: 'Interview Practice', icon: MessageSquare },
   { to: '/history', label: 'Analysis History', icon: Clock },
   { to: '/resume/versions', label: 'Version History', icon: GitCompare },
-  { to: '/documents', label: 'Documents', icon: FolderOpen },
   { to: '/profile', label: 'My Profile', icon: User },
-  { to: '/admin/users', label: 'Admin panel', icon: Shield, adminOnly: true },
+  { to: '/admin', label: 'Admin panel', icon: Shield, adminOnly: true },
 ]
 
 export default function Sidebar() {

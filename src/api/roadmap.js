@@ -3,17 +3,31 @@ import { apiRequest } from './client'
 /**
  * @typedef {Object} RoadmapResource
  * @property {string} name
- * @property {'Course'|'Free'|'Book'|'Docs'|'Cert'} type
+ * @property {'Course'|'Free'|'Book'|'Docs'|'Cert'|'Video'|'Article'|'Tutorial'} type
  * @property {string} provider
+ *
+ * @typedef {Object} RoadmapMilestones
+ * @property {string} beginner
+ * @property {string} intermediate
+ * @property {string} advanced
+ *
+ * @typedef {Object} RoadmapQuizQuestion
+ * @property {string} question
+ * @property {string[]} options - exactly 4 options
+ * @property {number} correct_index - 0-indexed
+ * @property {string} explanation
  *
  * @typedef {Object} RoadmapTopic
  * @property {string} topic_key
  * @property {string} title
  * @property {string} why_it_matters
+ * @property {string} current_gap - the candidate's specific gap for this topic
  * @property {string[]} learning_objectives
+ * @property {RoadmapMilestones} milestones
  * @property {RoadmapResource[]} resources
  * @property {string[]} projects
  * @property {string[]} exercises
+ * @property {RoadmapQuizQuestion[]} quiz
  * @property {number} estimated_hours
  * @property {'critical'|'high'|'medium'} priority
  * @property {boolean} done
@@ -61,3 +75,4 @@ export function regenerateRoadmap() {
 export function toggleRoadmapTopic({ topicKey }) {
   return apiRequest('/roadmap/topics/toggle', { method: 'POST', auth: true, body: { topic_key: topicKey } })
 }
+

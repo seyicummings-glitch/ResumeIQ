@@ -1,32 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getDocuments, deleteDocument, generateDocument, downloadDocument } from '../api/documents'
+import { useMutation } from '@tanstack/react-query'
+import { generateDocument } from '../api/documents'
 
-export function useDocuments() {
-  return useQuery({ queryKey: ['documents'], queryFn: getDocuments })
-}
-
+/** Generates and downloads a PDF report for an analysis — used by the "Download PDF report"
+ * action on Analysis History and Analysis Results. */
 export function useGenerateDocument() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: generateDocument,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-    },
-  })
-}
-
-export function useDeleteDocument() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: deleteDocument,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-    },
-  })
-}
-
-export function useDownloadDocument() {
-  return useMutation({
-    mutationFn: downloadDocument,
-  })
+  return useMutation({ mutationFn: generateDocument })
 }

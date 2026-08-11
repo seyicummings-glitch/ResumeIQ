@@ -8,7 +8,7 @@ import { Table, TableHead, Th, TableBody, Td } from '../components/ui/Table'
 import Select from '../components/ui/Select'
 import Input from '../components/ui/Input'
 import ScoreBadge from '../components/ui/ScoreBadge'
-import Badge from '../components/ui/Badge'
+import TagList from '../components/ui/TagList'
 import Card from '../components/ui/Card'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Spinner from '../components/ui/Spinner'
@@ -50,17 +50,7 @@ function SkillChipList({ title, skills, tone }) {
   return (
     <div>
       <p className="mb-2 text-sm font-medium text-text-h">{title}</p>
-      {skills.length === 0 ? (
-        <p className="text-sm text-text">None</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {skills.map((skill) => (
-            <Badge key={skill} tone={tone}>
-              {skill}
-            </Badge>
-          ))}
-        </div>
-      )}
+      {skills.length === 0 ? <p className="text-sm text-text">None</p> : <TagList items={skills} tone={tone} max={8} label={title.toLowerCase()} />}
     </div>
   )
 }

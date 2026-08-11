@@ -61,6 +61,7 @@ describe('chatAboutResume', () => {
         current_experience_bullets: ['One bullet.', 'Two bullet.'],
         current_skills_section: 'Go',
         jd_content: '',
+        attachment: null,
       },
     })
     expect(result).toEqual({
@@ -91,6 +92,31 @@ describe('chatAboutResume', () => {
 
     const [, options] = apiRequest.mock.calls[0]
     expect(options.body.jd_content).toBe('We need a Backend Engineer skilled in Python.')
+  })
+
+  it('maps an attachment to snake_case when one is included', async () => {
+    apiRequest.mockResolvedValue({
+      reply: "That's a screenshot of a job posting.",
+      summary: '',
+      experience_bullets: [],
+      skills_section: '',
+      source: 'ai',
+    })
+
+    await chatAboutResume({
+      conversation: [{ role: 'user', content: 'what does this say?' }],
+      currentSummary: '',
+      currentExperienceBullets: [],
+      currentSkillsSection: '',
+      attachment: { filename: 'job-posting.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=' },
+    })
+
+    const [, options] = apiRequest.mock.calls[0]
+    expect(options.body.attachment).toEqual({
+      filename: 'job-posting.png',
+      mime_type: 'image/png',
+      data_base64: 'aGVsbG8=',
+    })
   })
 })
 

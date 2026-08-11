@@ -12,6 +12,8 @@ import Spinner from '../components/ui/Spinner'
 import ErrorState from '../components/ui/ErrorState'
 import EmptyState from '../components/ui/EmptyState'
 import Badge from '../components/ui/Badge'
+import TagList from '../components/ui/TagList'
+import Modal from '../components/ui/Modal'
 import Button, { buttonClasses } from '../components/ui/Button'
 import { Tabs } from '../components/ui/Tabs'
 import { useToast } from '../components/ui/Toast'
@@ -332,21 +334,21 @@ function OverviewTab({
 }
 
 function KeywordsTab({ skillMatch, keywordAnalysis }) {
+  const [showAllMatchedKeywords, setShowAllMatchedKeywords] = useState(false)
   return (
     <div className="flex flex-col gap-4">
-      <Card className="p-4">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text/70">Skills</p>
-        <div className="flex flex-wrap gap-1.5">
-          {skillMatch.matched_skills.map((skill) => (
-            <Badge key={skill} tone="success">
-              {skill}
-            </Badge>
-          ))}
-          {skillMatch.missing_skills.map((skill) => (
-            <Badge key={skill} tone="danger">
-              {skill}
-            </Badge>
-          ))}
+      <Card className="flex flex-col gap-4 p-4">
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text/70">
+            Matched skills ({skillMatch.matched_skills.length})
+          </p>
+          <TagList items={skillMatch.matched_skills} tone="success" max={12} label="matched skills" />
+        </div>
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text/70">
+            Missing skills ({skillMatch.missing_skills.length})
+          </p>
+          <TagList items={skillMatch.missing_skills} tone="danger" max={12} label="missing skills" />
         </div>
       </Card>
 
@@ -357,7 +359,7 @@ function KeywordsTab({ skillMatch, keywordAnalysis }) {
               Keywords present ({keywordAnalysis.matched_keywords.length})
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {keywordAnalysis.matched_keywords.map((keyword) => (
+              {keywordAnalysis.matched_keywords.slice(0, 12).map((keyword) => (
                 <Badge key={keyword} tone="success">
                   {keyword}
                   {keywordAnalysis.keyword_frequency[keyword] > 1 && (
@@ -365,19 +367,41 @@ function KeywordsTab({ skillMatch, keywordAnalysis }) {
                   )}
                 </Badge>
               ))}
+              {keywordAnalysis.matched_keywords.length > 12 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllMatchedKeywords(true)}
+                  aria-label={`Show all ${keywordAnalysis.matched_keywords.length} matched keywords`}
+                  className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  <Badge tone="accent" className="cursor-pointer hover:opacity-80">
+                    +{keywordAnalysis.matched_keywords.length - 12} more
+                  </Badge>
+                </button>
+              )}
             </div>
+            <Modal
+              isOpen={showAllMatchedKeywords}
+              onClose={() => setShowAllMatchedKeywords(false)}
+              title={`All matched keywords (${keywordAnalysis.matched_keywords.length})`}
+            >
+              <div className="flex max-h-96 flex-wrap gap-1.5 overflow-y-auto">
+                {keywordAnalysis.matched_keywords.map((keyword) => (
+                  <Badge key={keyword} tone="success">
+                    {keyword}
+                    {keywordAnalysis.keyword_frequency[keyword] > 1 && (
+                      <span className="ml-1 opacity-70">×{keywordAnalysis.keyword_frequency[keyword]}</span>
+                    )}
+                  </Badge>
+                ))}
+              </div>
+            </Modal>
           </Card>
           <Card className="p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text/70">
               Keywords missing ({keywordAnalysis.missing_keywords.length})
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {keywordAnalysis.missing_keywords.map((keyword) => (
-                <Badge key={keyword} tone="danger">
-                  {keyword}
-                </Badge>
-              ))}
-            </div>
+            <TagList items={keywordAnalysis.missing_keywords} tone="danger" max={12} label="missing keywords" />
           </Card>
         </div>
       ) : (
@@ -613,7 +637,7 @@ export default function AnalysisResultsPage() {
   const hiringReadyScore = data.hiringReadinessScore ?? Math.round((atsScore + jdMatchScore + skillScore) / 3)
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 py-8">
+    <div className="flex flex-col gap-6 py-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-text-h">Analysis Results</h1>

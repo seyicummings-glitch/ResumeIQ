@@ -5,6 +5,7 @@ import { useToast } from '../components/ui/Toast'
 import { Table, TableHead, Th, TableBody, Td } from '../components/ui/Table'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
+import TagList from '../components/ui/TagList'
 import Select from '../components/ui/Select'
 import Spinner from '../components/ui/Spinner'
 import ErrorState from '../components/ui/ErrorState'
@@ -70,17 +71,7 @@ function SkillChipList({ title, skills, tone }) {
   return (
     <div>
       <p className="mb-2 text-sm font-medium text-text-h">{title}</p>
-      {skills.length === 0 ? (
-        <p className="text-sm text-text">None</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {skills.map((skill) => (
-            <Badge key={skill} tone={tone}>
-              {skill}
-            </Badge>
-          ))}
-        </div>
-      )}
+      {skills.length === 0 ? <p className="text-sm text-text">None</p> : <TagList items={skills} tone={tone} max={8} label={title.toLowerCase()} />}
     </div>
   )
 }
@@ -96,16 +87,9 @@ function VersionListRow({ version, onDownload, isDownloading }) {
       </Td>
       <Td>{version.filename}</Td>
       <Td>{formatDate(version.uploadedAt)}</Td>
-      <Td>
+      <Td className="max-w-[260px]">
         {version.skills.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {version.skills.slice(0, 6).map((skill) => (
-              <Badge key={skill} tone="neutral">
-                {skill}
-              </Badge>
-            ))}
-            {version.skills.length > 6 && <Badge tone="neutral">+{version.skills.length - 6} more</Badge>}
-          </div>
+          <TagList items={version.skills} tone="neutral" max={6} label={`skills for ${version.filename}`} />
         ) : (
           <span className="text-sm text-text">No skills detected</span>
         )}
@@ -178,7 +162,7 @@ export default function VersionHistoryPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 py-8">
+    <div className="flex flex-col gap-6 py-8">
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-text-h">Resume version history</h1>

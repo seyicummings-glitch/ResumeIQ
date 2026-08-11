@@ -46,10 +46,15 @@ export async function generateEnhancedResume() {
  * reply and the updated draft — no server-side session, the frontend owns both. The backend
  * always grounds on whatever resume is currently active on the account (if any); uploading a
  * file mid-conversation makes it active, so the next turn picks it up automatically.
- * @param {{conversation:BuilderChatMessage[], currentSummary:string, currentExperienceBullets:string[], currentSkillsSection:string, jdContent?:string}} params
+ * @typedef {Object} BuilderChatAttachment
+ * @property {string} filename
+ * @property {string} mimeType
+ * @property {string} dataBase64
+ *
+ * @param {{conversation:BuilderChatMessage[], currentSummary:string, currentExperienceBullets:string[], currentSkillsSection:string, jdContent?:string, attachment?:BuilderChatAttachment|null}} params
  * @returns {Promise<BuilderChatReply>}
  */
-export async function chatAboutResume({ conversation, currentSummary, currentExperienceBullets, currentSkillsSection, jdContent }) {
+export async function chatAboutResume({ conversation, currentSummary, currentExperienceBullets, currentSkillsSection, jdContent, attachment }) {
   const row = await apiRequest('/resume-builder/chat', {
     method: 'POST',
     auth: true,
@@ -59,6 +64,9 @@ export async function chatAboutResume({ conversation, currentSummary, currentExp
       current_experience_bullets: currentExperienceBullets,
       current_skills_section: currentSkillsSection,
       jd_content: jdContent || '',
+      attachment: attachment
+        ? { filename: attachment.filename, mime_type: attachment.mimeType, data_base64: attachment.dataBase64 }
+        : null,
     },
   })
   return {
