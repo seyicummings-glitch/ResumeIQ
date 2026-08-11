@@ -36,6 +36,8 @@ def test_no_api_key_returns_fallback(monkeypatch):
     assert result["source"] == "fallback"
     assert "1 question" in result["overall_assessment"]
     assert result["study_topics"] == ["kubernetes"]
+    assert result["overall_score"] is None
+    assert isinstance(result["recommended_improvements"], list)
 
 
 def test_no_api_key_no_missing_skills_still_returns_study_topics(monkeypatch):
@@ -76,8 +78,13 @@ def test_successful_call_returns_ai_feedback(mock_client_cls, monkeypatch):
     mock_response = Mock()
     mock_response.text = json.dumps({
         "overall_assessment": "Solid technical depth, but answers lacked concrete metrics.",
+        "overall_score": 78,
+        "technical_performance": "Strong grasp of REST API design.",
+        "communication_assessment": "Answers were clear and well-structured.",
+        "confidence_assessment": "Spoke with conviction throughout.",
         "strengths": ["Clear explanation of the API architecture."],
         "areas_to_improve": ["Quantify impact with numbers."],
+        "recommended_improvements": ["Practice adding metrics to every answer."],
         "study_topics": ["Kubernetes", "System design basics"],
         "role_knowledge_tips": ["Fintech interviews often probe on data consistency."],
     })
@@ -94,6 +101,11 @@ def test_successful_call_returns_ai_feedback(mock_client_cls, monkeypatch):
     assert result["source"] == "ai"
     assert "metrics" in result["overall_assessment"]
     assert result["study_topics"] == ["Kubernetes", "System design basics"]
+    assert result["overall_score"] == 78
+    assert result["technical_performance"] == "Strong grasp of REST API design."
+    assert result["communication_assessment"] == "Answers were clear and well-structured."
+    assert result["confidence_assessment"] == "Spoke with conviction throughout."
+    assert result["recommended_improvements"] == ["Practice adding metrics to every answer."]
 
 
 @patch("app.services.interview_feedback.genai.Client")
@@ -133,8 +145,13 @@ def test_gemini_quota_error_falls_back_to_groq(mock_gemini_client_cls, mock_groq
     mock_groq_client = Mock()
     mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
         "overall_assessment": "Solid technical depth, but answers lacked concrete metrics.",
+        "overall_score": 72,
+        "technical_performance": "Good grasp of the API architecture.",
+        "communication_assessment": "Clear and well-organized.",
+        "confidence_assessment": "Came across as confident.",
         "strengths": ["Clear explanation of the API architecture."],
         "areas_to_improve": ["Quantify impact with numbers."],
+        "recommended_improvements": ["Practice quantifying impact with metrics."],
         "study_topics": ["Kubernetes", "System design basics"],
         "role_knowledge_tips": ["Fintech interviews often probe on data consistency."],
     })
@@ -150,6 +167,7 @@ def test_gemini_quota_error_falls_back_to_groq(mock_gemini_client_cls, mock_groq
 
     assert result["source"] == "ai"
     assert "metrics" in result["overall_assessment"]
+    assert result["overall_score"] == 72
     mock_groq_client.chat.completions.create.assert_called_once()
     assert mock_groq_client.chat.completions.create.call_args.kwargs["model"] == "llama-3.3-70b-versatile"
 
@@ -245,7 +263,10 @@ def test_both_gemini_keys_exhausted_falls_back_to_groq(mock_gemini_client_cls, m
     mock_groq_client = Mock()
     mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
         "overall_assessment": "From Groq.",
-        "strengths": [], "areas_to_improve": [], "study_topics": [], "role_knowledge_tips": [],
+        "overall_score": 60,
+        "technical_performance": "N/A", "communication_assessment": "N/A", "confidence_assessment": "N/A",
+        "strengths": [], "areas_to_improve": [], "recommended_improvements": [],
+        "study_topics": [], "role_knowledge_tips": [],
     })
     mock_groq_client_fn.return_value = mock_groq_client
 

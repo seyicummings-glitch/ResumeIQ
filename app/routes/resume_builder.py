@@ -1,3 +1,5 @@
+import base64
+import binascii
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -5,11 +7,18 @@ from app.services.resume_builder import generate_enhanced_resume, chat_about_res
 from app.services.resume_structurer import extract_skills_list
 from app.services.analysis_store import get_latest_analysis
 from app.services.platform_settings import is_ai_enabled
+from app.services.attachment_ai import analyze_attachment
 from app.database import get_db
 from app.models.models import Resume, User
 from app.security import get_current_user
 
 router = APIRouter(prefix="/resume-builder", tags=["AI Resume Builder"])
+
+# Attachments are sent base64-encoded inside the JSON chat request rather than as a separate
+# multipart upload, to keep this one request/response shape like the rest of this API — fine
+# for the images/screenshots/PDFs/short documents this feature targets, not meant for large
+# files. 8MB decoded (~10.9MB base64-encoded) matches the resume upload limit's default.
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 
 def _get_latest_active_resume(db: Session, user_id: int) -> Resume | None:
@@ -56,6 +65,12 @@ class ResumeBuilderChatMessage(BaseModel):
     content: str
 
 
+class ChatAttachment(BaseModel):
+    filename: str
+    mime_type: str
+    data_base64: str
+
+
 class ResumeBuilderChatInput(BaseModel):
     conversation: list[ResumeBuilderChatMessage] = []
     current_summary: str = ""
@@ -66,6 +81,8 @@ class ResumeBuilderChatInput(BaseModel):
     # extracts the real text via the existing /job-description/parse-url
     # pipeline and sends it here to ground the resume tailoring.
     jd_content: str = ""
+    # An image, screenshot, PDF, or document attached to this turn's message, if any.
+    attachment: ChatAttachment | None = None
 
 
 @router.post("/chat")
@@ -79,7 +96,11 @@ def chat_resume(
     server-side session state to manage. Always grounds on the user's current active resume
     if one exists (uploading a new file mid-conversation makes it the active resume, so the
     very next turn picks it up automatically); if none exists yet, the AI builds from whatever
-    the user tells it in chat instead."""
+    the user tells it in chat instead.
+
+    If an attachment came with this turn, it's analyzed once here (see attachment_ai.py — real
+    vision for images/PDFs, extracted text for other documents) and folded into the last user
+    message as extra context, rather than resent as binary on every future turn."""
     resume = _get_latest_active_resume(db, current_user.id)
     resume_text = ""
     missing_skills = []
@@ -90,6 +111,38 @@ def chat_resume(
             missing_skills = analysis.result_json.get("skill_match", {}).get("missing_skills", []) or []
 
     conversation = [m.model_dump() for m in data.conversation]
+
+    if data.attachment:
+        try:
+            file_bytes = base64.b64decode(data.attachment.data_base64, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=400, detail="Attachment data is not valid base64.")
+        if len(file_bytes) > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(status_code=400, detail="Attachment is too large (max 8MB).")
+
+        last_user_message = conversation[-1]["content"] if conversation else ""
+        analysis_result = analyze_attachment(
+            file_bytes=file_bytes,
+            mime_type=data.attachment.mime_type,
+            filename=data.attachment.filename,
+            user_message=last_user_message or None,
+            ai_enabled=is_ai_enabled(db),
+        )
+
+        if analysis_result["description"] is None:
+            return {
+                "reply": analysis_result["message"] or "Couldn't analyze that attachment. Your draft wasn't changed.",
+                "summary": data.current_summary,
+                "experience_bullets": data.current_experience_bullets,
+                "skills_section": data.current_skills_section,
+                "source": "fallback",
+            }
+
+        attachment_note = f"\n\n[Attached file: {data.attachment.filename}]\n{analysis_result['description']}"
+        if conversation:
+            conversation[-1]["content"] = (conversation[-1]["content"] or "") + attachment_note
+        else:
+            conversation.append({"role": "user", "content": attachment_note.strip()})
 
     return chat_about_resume(
         conversation=conversation,

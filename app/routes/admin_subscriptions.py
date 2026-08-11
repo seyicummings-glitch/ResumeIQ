@@ -1,0 +1,219 @@
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.models import User
+from app.models.subscription_models import Plan, PlanLimit
+from app.security import require_admin
+from app.services.pagination import paginate, page_response
+from app.services.subscription_limits import FEATURE_KEYS
+from app.services.stripe_client import sync_plan_to_stripe
+
+router = APIRouter(prefix="/admin/subscriptions", tags=["Admin - Subscriptions"])
+
+
+def _serialize_plan(plan: Plan) -> dict:
+    return {
+        "id": plan.id,
+        "name": plan.name,
+        "slug": plan.slug,
+        "description": plan.description,
+        "monthlyPriceCents": plan.monthly_price_cents,
+        "yearlyPriceCents": plan.yearly_price_cents,
+        "currency": plan.currency,
+        "isActive": plan.is_active,
+        "displayOrder": plan.display_order,
+        "stripeProductId": plan.stripe_product_id,
+        "createdAt": plan.created_at,
+        "updatedAt": plan.updated_at,
+    }
+
+
+def _serialize_limit(limit: PlanLimit) -> dict:
+    return {"featureKey": limit.feature_key, "dailyLimit": limit.daily_limit, "monthlyLimit": limit.monthly_limit}
+
+
+@router.get("/plans")
+def list_plans(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=100),
+    search: str | None = None,
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    query = db.query(Plan)
+    if search:
+        query = query.filter(Plan.name.ilike(f"%{search}%"))
+    if status == "active":
+        query = query.filter(Plan.is_active.is_(True))
+    elif status == "inactive":
+        query = query.filter(Plan.is_active.is_(False))
+
+    query = query.order_by(Plan.display_order, Plan.id)
+    items, total = paginate(query, page, pageSize)
+    return page_response([_serialize_plan(plan) for plan in items], total, page, pageSize)
+
+
+class PlanCreateInput(BaseModel):
+    name: str
+    slug: str
+    description: str | None = None
+    monthlyPriceCents: int
+    yearlyPriceCents: int | None = None
+    currency: str = "usd"
+    displayOrder: int = 0
+
+
+@router.post("/plans")
+def create_plan(data: PlanCreateInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    existing = db.query(Plan).filter(Plan.slug == data.slug).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="A plan with that slug already exists.")
+
+    plan = Plan(
+        name=data.name,
+        slug=data.slug,
+        description=data.description,
+        monthly_price_cents=data.monthlyPriceCents,
+        yearly_price_cents=data.yearlyPriceCents,
+        currency=data.currency,
+        display_order=data.displayOrder,
+    )
+    try:
+        sync_plan_to_stripe(plan)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not sync plan to Stripe: {str(e)}")
+
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return _serialize_plan(plan)
+
+
+class PlanUpdateInput(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    monthlyPriceCents: int | None = None
+    yearlyPriceCents: int | None = None
+    currency: str | None = None
+    displayOrder: int | None = None
+
+
+@router.patch("/plans/{plan_id}")
+def update_plan(
+    plan_id: int, data: PlanUpdateInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    price_changed = (
+        (data.monthlyPriceCents is not None and data.monthlyPriceCents != plan.monthly_price_cents)
+        or (data.yearlyPriceCents is not None and data.yearlyPriceCents != plan.yearly_price_cents)
+    )
+
+    if data.name is not None:
+        plan.name = data.name
+    if data.description is not None:
+        plan.description = data.description
+    if data.monthlyPriceCents is not None:
+        plan.monthly_price_cents = data.monthlyPriceCents
+    if data.yearlyPriceCents is not None:
+        plan.yearly_price_cents = data.yearlyPriceCents
+    if data.currency is not None:
+        plan.currency = data.currency
+    if data.displayOrder is not None:
+        plan.display_order = data.displayOrder
+
+    if price_changed or data.name is not None or data.description is not None:
+        try:
+            sync_plan_to_stripe(plan)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=502, detail=f"Could not sync plan to Stripe: {str(e)}")
+
+    db.commit()
+    db.refresh(plan)
+    return _serialize_plan(plan)
+
+
+class PlanStatusInput(BaseModel):
+    isActive: bool
+
+
+@router.patch("/plans/{plan_id}/status")
+def set_plan_status(
+    plan_id: int, data: PlanStatusInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    plan.is_active = data.isActive
+    db.commit()
+    db.refresh(plan)
+    return _serialize_plan(plan)
+
+
+@router.delete("/plans/{plan_id}")
+def delete_plan(plan_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """No subscriber check yet — the Subscription table doesn't exist until
+    Wave 2, so no plan can have real subscribers today. Wave 2 must add a
+    guard here once Subscription exists."""
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    db.query(PlanLimit).filter(PlanLimit.plan_id == plan_id).delete()
+    db.delete(plan)
+    db.commit()
+    return {"message": "Plan deleted."}
+
+
+@router.get("/plans/{plan_id}/limits")
+def get_plan_limits(plan_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    existing = {limit.feature_key: limit for limit in db.query(PlanLimit).filter(PlanLimit.plan_id == plan_id).all()}
+    return [
+        _serialize_limit(existing[key]) if key in existing else {"featureKey": key, "dailyLimit": None, "monthlyLimit": None}
+        for key in FEATURE_KEYS
+    ]
+
+
+class PlanLimitInput(BaseModel):
+    featureKey: str
+    dailyLimit: int | None = None
+    monthlyLimit: int | None = None
+
+
+class PlanLimitsUpdateInput(BaseModel):
+    limits: list[PlanLimitInput]
+
+
+@router.put("/plans/{plan_id}/limits")
+def update_plan_limits(
+    plan_id: int, data: PlanLimitsUpdateInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    plan = db.query(Plan).filter(Plan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    invalid_keys = [entry.featureKey for entry in data.limits if entry.featureKey not in FEATURE_KEYS]
+    if invalid_keys:
+        raise HTTPException(status_code=400, detail=f"Unknown feature key(s): {', '.join(invalid_keys)}")
+
+    existing = {limit.feature_key: limit for limit in db.query(PlanLimit).filter(PlanLimit.plan_id == plan_id).all()}
+    for entry in data.limits:
+        if entry.featureKey in existing:
+            existing[entry.featureKey].daily_limit = entry.dailyLimit
+            existing[entry.featureKey].monthly_limit = entry.monthlyLimit
+        else:
+            db.add(PlanLimit(plan_id=plan_id, feature_key=entry.featureKey, daily_limit=entry.dailyLimit, monthly_limit=entry.monthlyLimit))
+
+    db.commit()
+    return get_plan_limits(plan_id, db, current_user)

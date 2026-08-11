@@ -42,12 +42,21 @@ FEEDBACK_SCHEMA = {
     "type": "object",
     "properties": {
         "overall_assessment": {"type": "string"},
+        "overall_score": {"type": "integer"},
+        "technical_performance": {"type": "string"},
+        "communication_assessment": {"type": "string"},
+        "confidence_assessment": {"type": "string"},
         "strengths": {"type": "array", "items": {"type": "string"}},
         "areas_to_improve": {"type": "array", "items": {"type": "string"}},
+        "recommended_improvements": {"type": "array", "items": {"type": "string"}},
         "study_topics": {"type": "array", "items": {"type": "string"}},
         "role_knowledge_tips": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["overall_assessment", "strengths", "areas_to_improve", "study_topics", "role_knowledge_tips"],
+    "required": [
+        "overall_assessment", "overall_score", "technical_performance", "communication_assessment",
+        "confidence_assessment", "strengths", "areas_to_improve", "recommended_improvements",
+        "study_topics", "role_knowledge_tips",
+    ],
     "additionalProperties": False,
 }
 
@@ -71,9 +80,24 @@ def _build_prompt(transcript: list, resume_text: str, jd_title: str, jd_content:
         f"Full interview transcript:\n{transcript_text[:6000]}\n\n"
         "Produce:\n"
         "- overall_assessment: 2-4 sentences, honest and specific to what they actually said.\n"
+        "- overall_score: an integer 0-100 reflecting overall interview performance across the whole session — "
+        "be a realistic, discriminating grader (a candidate who gave thin, unstructured answers throughout "
+        "should not score above ~50; a candidate who was consistently sharp, specific, and well-structured can "
+        "score 85+). Base it on the actual transcript, not on effort or participation alone.\n"
+        "- technical_performance: 1-3 sentences assessing technical knowledge and problem-solving ability shown "
+        "in the answers — depth, accuracy, and how they reasoned through technical questions. If the session had "
+        "no technical questions, say so briefly instead of inventing an assessment.\n"
+        "- communication_assessment: 1-3 sentences on clarity, structure, and how well they explained themselves "
+        "— e.g. whether answers were organized (STAR-style for behavioral ones), concise vs. rambling, and easy "
+        "to follow.\n"
+        "- confidence_assessment: 1-3 sentences on how confident, direct, and decisive their answers came "
+        "across — hedging and vagueness read as low confidence; specific, owned claims read as high confidence.\n"
         "- strengths: 2-4 concrete things they did well in their answers (reference specifics, not platitudes).\n"
-        "- areas_to_improve: 2-4 specific, actionable things to work on based on how they actually answered "
-        "(e.g. vague answers, missing structure, weak examples) — not generic interview advice.\n"
+        "- areas_to_improve: 2-4 specific weaknesses based on how they actually answered (e.g. vague answers, "
+        "missing structure, weak examples, factual errors) — not generic interview advice.\n"
+        "- recommended_improvements: 2-4 concrete, actionable next steps the candidate should do before their "
+        "real interview to fix the weaknesses above (e.g. practice a specific type of question, learn a "
+        "specific concept, tighten a specific habit) — actions, not restated criticism.\n"
         "- study_topics: 2-5 specific skills, tools, or concepts worth studying before the real interview, "
         "prioritizing the job's gap skills and anything they stumbled on.\n"
         "- role_knowledge_tips: 2-4 pieces of extra knowledge about this type of role or domain that would "
@@ -88,9 +112,18 @@ def _fallback_feedback(transcript: list, missing_skills: list, message: str) -> 
             f"{message} You answered {answered_count} question{'s' if answered_count != 1 else ''} in this "
             "session — review your answers above and compare them against the job description."
         ),
+        # No AI available to actually grade the transcript — None (not a guessed number) so the
+        # frontend can show "Not scored" instead of a fabricated score.
+        "overall_score": None,
+        "technical_performance": "Not available without AI feedback — review your technical answers yourself against the job description.",
+        "communication_assessment": "Not available without AI feedback — review your answers for clarity and structure yourself.",
+        "confidence_assessment": "Not available without AI feedback.",
         "strengths": ["You completed a full mock interview session, which is real practice on its own."],
         "areas_to_improve": [
             "Without AI feedback available, review your own answers for clarity, structure, and specific examples."
+        ],
+        "recommended_improvements": [
+            "Re-run this session once AI feedback is available for a real critique of your answers."
         ],
         "study_topics": missing_skills[:5] if missing_skills else ["Re-read the job description and note any unfamiliar requirements."],
         "role_knowledge_tips": [],
@@ -107,7 +140,9 @@ def _feedback_via_groq(transcript: list, resume_text: str, jd_title: str, jd_con
         raise RuntimeError("GROQ_API_KEY is not configured")
 
     prompt = _build_prompt(transcript, resume_text, jd_title, jd_content, missing_skills) + groq_json_instructions(
-        '"overall_assessment" (string), "strengths" (array of strings), "areas_to_improve" (array of strings), '
+        '"overall_assessment" (string), "overall_score" (integer 0-100), "technical_performance" (string), '
+        '"communication_assessment" (string), "confidence_assessment" (string), "strengths" (array of strings), '
+        '"areas_to_improve" (array of strings), "recommended_improvements" (array of strings), '
         '"study_topics" (array of strings), "role_knowledge_tips" (array of strings)'
     )
 
@@ -119,7 +154,11 @@ def _feedback_via_groq(transcript: list, resume_text: str, jd_title: str, jd_con
         response_format={"type": "json_object"},
     )
     result = json.loads(response.choices[0].message.content)
-    for key in ("overall_assessment", "strengths", "areas_to_improve", "study_topics", "role_knowledge_tips"):
+    for key in (
+        "overall_assessment", "overall_score", "technical_performance", "communication_assessment",
+        "confidence_assessment", "strengths", "areas_to_improve", "recommended_improvements",
+        "study_topics", "role_knowledge_tips",
+    ):
         if key not in result:
             raise ValueError(f"Groq response missing required key: {key}")
     return result

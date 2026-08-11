@@ -5,7 +5,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import AnalysisResult, Resume, JobDescription, User
-from app.models.document_models import GeneratedDocument
 from app.services.pdf_report import generate_analysis_pdf
 from app.security import get_current_user
 
@@ -25,20 +24,6 @@ def _pdf_response(pdf_bytes: bytes, filename: str) -> Response:
     )
 
 
-def _load_report_inputs(db: Session, analysis_id: int, user_id: int):
-    """Load an AnalysisResult (ownership-checked) plus its Resume and JobDescription."""
-    analysis = db.query(AnalysisResult).filter(
-        AnalysisResult.id == analysis_id, AnalysisResult.user_id == user_id
-    ).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found.")
-
-    resume = db.query(Resume).filter(Resume.id == analysis.resume_id).first()
-    job_description = db.query(JobDescription).filter(JobDescription.id == analysis.job_description_id).first()
-
-    return analysis, resume, job_description
-
-
 class DocumentGenerateInput(BaseModel):
     analysis_id: int
 
@@ -49,83 +34,17 @@ def generate_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """Generates a PDF report for an analysis on demand — called from the "Download PDF
+    report" action on Analysis History / Analysis Results. Generated fresh every time rather
+    than stored: the standalone Documents page (a saved-file archive) was removed since it only
+    ever duplicated this same download, so there's no reason to keep a database record around
+    that nothing lists or manages anymore."""
     try:
-        analysis, resume, job_description = _load_report_inputs(db, data.analysis_id, current_user.id)
-
-        resume_filename = resume.filename if resume else "Unknown resume"
-        jd_title = (job_description.title if job_description and job_description.title else "Analysis")
-
-        pdf_bytes = generate_analysis_pdf(
-            analysis=analysis.result_json or {},
-            resume_filename=resume_filename,
-            jd_title=jd_title,
-        )
-
-        document = GeneratedDocument(
-            user_id=current_user.id,
-            name=f"{resume_filename} — {jd_title} Report.pdf",
-            doc_type="analysis-report",
-            analysis_id=analysis.id,
-            size_kb=round(len(pdf_bytes) / 1024),
-        )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
-
-        return _pdf_response(pdf_bytes, document.name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating document: {str(e)}")
-
-
-@router.get("")
-def list_documents(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    rows = (
-        db.query(GeneratedDocument)
-        .filter(GeneratedDocument.user_id == current_user.id)
-        .order_by(GeneratedDocument.created_at.desc())
-        .all()
-    )
-    return [
-        {
-            "id": row.id,
-            "name": row.name,
-            "doc_type": row.doc_type,
-            "analysis_id": row.analysis_id,
-            "size_kb": row.size_kb,
-            "created_at": row.created_at,
-        }
-        for row in rows
-    ]
-
-
-@router.get("/{document_id}/download")
-def download_document(
-    document_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        document = db.query(GeneratedDocument).filter(
-            GeneratedDocument.id == document_id, GeneratedDocument.user_id == current_user.id
-        ).first()
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found.")
-
-        if document.analysis_id is None:
-            raise HTTPException(status_code=404, detail="This document has no linked analysis to regenerate from.")
-
         analysis = db.query(AnalysisResult).filter(
-            AnalysisResult.id == document.analysis_id, AnalysisResult.user_id == current_user.id
+            AnalysisResult.id == data.analysis_id, AnalysisResult.user_id == current_user.id
         ).first()
         if not analysis:
-            raise HTTPException(status_code=404, detail="The underlying analysis for this document was deleted.")
+            raise HTTPException(status_code=404, detail="Analysis not found.")
 
         resume = db.query(Resume).filter(Resume.id == analysis.resume_id).first()
         job_description = db.query(JobDescription).filter(JobDescription.id == analysis.job_description_id).first()
@@ -139,33 +58,10 @@ def download_document(
             jd_title=jd_title,
         )
 
-        return _pdf_response(pdf_bytes, document.name)
+        return _pdf_response(pdf_bytes, f"{resume_filename} — {jd_title} Report.pdf")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading document: {str(e)}")
-
-
-@router.delete("/{document_id}")
-def delete_document(
-    document_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        document = db.query(GeneratedDocument).filter(
-            GeneratedDocument.id == document_id, GeneratedDocument.user_id == current_user.id
-        ).first()
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found.")
-
-        db.delete(document)
-        db.commit()
-
-        return {"message": "Document deleted."}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating document: {str(e)}")

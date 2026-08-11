@@ -198,8 +198,27 @@ def _latest_analysis_for_resume(db: Session, resume_id: int) -> AnalysisResult |
     )
 
 
-def _resume_version_summary(db: Session, resume: Resume) -> dict:
-    analysis = _latest_analysis_for_resume(db, resume.id)
+def _latest_analyses_by_resume(db: Session, resume_ids: list[int]) -> dict[int, AnalysisResult]:
+    """Batch equivalent of _latest_analysis_for_resume — one query for every resume instead of
+    one query per resume. get_resume_versions() previously called _latest_analysis_for_resume
+    (plus a JobDescription lookup) inside a per-resume loop, which meant a page load did
+    roughly 2x the resume count in extra round-trips to the database — the main contributor to
+    Dashboard/Version History feeling slow to load for accounts with many saved resumes."""
+    if not resume_ids:
+        return {}
+    rows = (
+        db.query(AnalysisResult)
+        .filter(AnalysisResult.resume_id.in_(resume_ids))
+        .order_by(AnalysisResult.resume_id, AnalysisResult.created_at.desc())
+        .all()
+    )
+    latest_by_resume: dict[int, AnalysisResult] = {}
+    for row in rows:
+        latest_by_resume.setdefault(row.resume_id, row)
+    return latest_by_resume
+
+
+def _resume_version_summary(resume: Resume, analysis: AnalysisResult | None, job: JobDescription | None) -> dict:
     latest_scores = None
     if analysis and analysis.result_json:
         latest_scores = {
@@ -207,11 +226,7 @@ def _resume_version_summary(db: Session, resume: Resume) -> dict:
             "skill_match": analysis.result_json.get("skill_match"),
         }
 
-    latest_job_title = None
-    if analysis:
-        job = db.query(JobDescription).filter(JobDescription.id == analysis.job_description_id).first()
-        if job:
-            latest_job_title = derive_job_title(job.title, job.content)
+    latest_job_title = derive_job_title(job.title, job.content) if job else None
 
     return {
         "id": resume.id,
@@ -246,7 +261,21 @@ def get_resume_versions(
         .order_by(Resume.version.desc())
         .all()
     )
-    return [_resume_version_summary(db, resume) for resume in resumes]
+
+    latest_by_resume = _latest_analyses_by_resume(db, [r.id for r in resumes])
+    job_ids = {a.job_description_id for a in latest_by_resume.values()}
+    jobs_by_id = (
+        {j.id: j for j in db.query(JobDescription).filter(JobDescription.id.in_(job_ids)).all()}
+        if job_ids
+        else {}
+    )
+
+    summaries = []
+    for resume in resumes:
+        analysis = latest_by_resume.get(resume.id)
+        job = jobs_by_id.get(analysis.job_description_id) if analysis else None
+        summaries.append(_resume_version_summary(resume, analysis, job))
+    return summaries
 
 
 @router.get("/versions/compare")
@@ -266,6 +295,8 @@ def compare_resume_versions(
 
     analysis_a = _latest_analysis_for_resume(db, resume_a.id)
     analysis_b = _latest_analysis_for_resume(db, resume_b.id)
+    job_a = db.query(JobDescription).filter(JobDescription.id == analysis_a.job_description_id).first() if analysis_a else None
+    job_b = db.query(JobDescription).filter(JobDescription.id == analysis_b.job_description_id).first() if analysis_b else None
 
     skill_diff = None
     if analysis_a and analysis_a.result_json and analysis_b and analysis_b.result_json:
@@ -281,8 +312,8 @@ def compare_resume_versions(
         skill_diff = {"resolved": resolved, "remaining": remaining, "added": added}
 
     return {
-        "resume_a": _resume_version_summary(db, resume_a),
-        "resume_b": _resume_version_summary(db, resume_b),
+        "resume_a": _resume_version_summary(resume_a, analysis_a, job_a),
+        "resume_b": _resume_version_summary(resume_b, analysis_b, job_b),
         "skill_diff": skill_diff,
     }
 

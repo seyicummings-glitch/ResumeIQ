@@ -133,7 +133,7 @@ def get_resources(skill: str) -> list[dict]:
             provider = get_provider(skill)
             return [{"name": r, "type": get_resource_type(skill), "provider": provider} for r in resources]
     return [
-        {"name": f'Search "{skill} tutorial" on YouTube', "type": "Free", "provider": "YouTube"},
+        {"name": f'Search "{skill} tutorial" on YouTube', "type": "Video", "provider": "YouTube"},
         {"name": f"Official documentation for {skill}", "type": "Docs", "provider": "Official docs"},
         {"name": f'Search "{skill} course" on Udemy — filter by highest rated', "type": "Course", "provider": "Udemy"},
     ]
@@ -287,6 +287,70 @@ _JOB_READY_TOPICS = [
 ]
 
 
+def _generic_current_gap(skill: str) -> str:
+    return (
+        f"Not clearly demonstrated on your resume or in prior sessions — this roadmap treats {skill} as new "
+        "ground rather than assuming existing depth."
+    )
+
+
+def _generic_milestones(skill: str) -> dict:
+    return {
+        "beginner": f"You understand the core concepts of {skill} and can follow a guided tutorial without getting stuck.",
+        "intermediate": f"You can build a small project with {skill} mostly unassisted, referring to docs when needed.",
+        "advanced": f"You can debug non-trivial issues in {skill} and explain the real trade-offs of using it.",
+    }
+
+
+def _generic_quiz(skill: str) -> list[dict]:
+    return [
+        {
+            "question": f"What's the best way to confirm you've actually learned {skill}, not just read about it?",
+            "options": [
+                "Watching more videos about it",
+                f"Building something real with {skill} and explaining your choices",
+                "Memorizing the official documentation",
+                "Skipping straight to using it in an interview",
+            ],
+            "correct_index": 1,
+            "explanation": "Hands-on application — not passive consumption — is what actually builds and proves competence.",
+        },
+        {
+            "question": f"When you get stuck on a {skill} problem you haven't seen before, what should you do first?",
+            "options": [
+                "Give up and move to a different topic",
+                "Guess randomly until something works",
+                "Break the problem down and check the official docs or source for how it's meant to work",
+                "Wait for someone else to solve it",
+            ],
+            "correct_index": 2,
+            "explanation": "Systematically narrowing down a problem using authoritative sources is the core debugging skill that separates guided learning from real competence.",
+        },
+    ]
+
+
+def _add_depth_fields(stages: list[dict]) -> list[dict]:
+    """Fills in current_gap/milestones/quiz on every topic with generic, deterministic
+    content — keeps the rule-based fallback's shape identical to the AI path's (see
+    learning_roadmap_ai.py's ROADMAP_SCHEMA) without hand-authoring 16 topics' worth of it.
+    Builds new dicts rather than mutating in place — _FOUNDATION_TOPICS/_JOB_READY_TOPICS are
+    shared module-level lists reused across every call/request, so mutating their dicts in
+    place would leak state between unrelated roadmaps."""
+    new_stages = []
+    for stage in stages:
+        new_topics = []
+        for topic in stage["topics"]:
+            title = topic["title"]
+            new_topics.append({
+                **topic,
+                "current_gap": topic.get("current_gap") or _generic_current_gap(title),
+                "milestones": topic.get("milestones") or _generic_milestones(title),
+                "quiz": topic.get("quiz") or _generic_quiz(title),
+            })
+        new_stages.append({**stage, "topics": new_topics})
+    return new_stages
+
+
 def build_roadmap(missing_skills: list[str], resume_skills: list[str]) -> dict:
     """Deterministic 4-stage roadmap: Foundation and Job Ready are evergreen,
     role-agnostic stages; Intermediate and Advanced are built from the
@@ -328,4 +392,4 @@ def build_roadmap(missing_skills: list[str], resume_skills: list[str]) -> dict:
         },
     ]
 
-    return {"stages": stages}
+    return {"stages": _add_depth_fields(stages)}

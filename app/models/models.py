@@ -22,6 +22,9 @@ class User(Base):
     industry = Column(String, nullable=True)
     experience_level = Column(String, nullable=True)
     career_goals = Column(Text, nullable=True)
+    country = Column(String, nullable=True)
+    subscription_plan = Column(String, default="free", nullable=True)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     resumes = relationship("Resume", back_populates="owner")
@@ -42,6 +45,7 @@ class Resume(Base):
     version = Column(Integer, default=1, nullable=False)
     label = Column(String, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    source = Column(String, default="upload", nullable=True)  # "upload" | "ai_builder"
     file_data = Column(LargeBinary, nullable=True)
     file_content_type = Column(String, nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())

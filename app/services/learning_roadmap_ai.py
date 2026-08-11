@@ -46,12 +46,37 @@ def _gemini_api_keys() -> list[str]:
 STAGE_NAMES = ["Foundation", "Intermediate", "Advanced", "Job Ready"]
 TOPICS_PER_STAGE = 4
 
+_MILESTONES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "beginner": {"type": "string"},
+        "intermediate": {"type": "string"},
+        "advanced": {"type": "string"},
+    },
+    "required": ["beginner", "intermediate", "advanced"],
+    "additionalProperties": False,
+}
+
+_QUIZ_QUESTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "string"}, "minItems": 4, "maxItems": 4},
+        "correct_index": {"type": "integer"},
+        "explanation": {"type": "string"},
+    },
+    "required": ["question", "options", "correct_index", "explanation"],
+    "additionalProperties": False,
+}
+
 _TOPIC_SCHEMA = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
         "why_it_matters": {"type": "string"},
+        "current_gap": {"type": "string"},
         "learning_objectives": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 4},
+        "milestones": _MILESTONES_SCHEMA,
         "resources": {
             "type": "array",
             "minItems": 2,
@@ -60,7 +85,10 @@ _TOPIC_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string"},
-                    "type": {"type": "string", "enum": ["Course", "Free", "Book", "Docs", "Cert"]},
+                    "type": {
+                        "type": "string",
+                        "enum": ["Course", "Free", "Book", "Docs", "Cert", "Video", "Article", "Tutorial"],
+                    },
                     "provider": {"type": "string"},
                 },
                 "required": ["name", "type", "provider"],
@@ -69,10 +97,14 @@ _TOPIC_SCHEMA = {
         },
         "projects": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
         "exercises": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
+        "quiz": {"type": "array", "minItems": 2, "maxItems": 3, "items": _QUIZ_QUESTION_SCHEMA},
         "estimated_hours": {"type": "integer"},
         "priority": {"type": "string", "enum": ["critical", "high", "medium"]},
     },
-    "required": ["title", "why_it_matters", "learning_objectives", "resources", "projects", "exercises", "estimated_hours", "priority"],
+    "required": [
+        "title", "why_it_matters", "current_gap", "learning_objectives", "milestones", "resources",
+        "projects", "exercises", "quiz", "estimated_hours", "priority",
+    ],
     "additionalProperties": False,
 }
 
@@ -162,11 +194,24 @@ concrete, checkable capability statement ("You can now build and deploy a full R
 For each stage, generate exactly {TOPICS_PER_STAGE} topics. Each topic needs:
 - title: a specific topic, not a vague category (e.g. "REST API design and versioning", not "Backend basics").
 - why_it_matters: 1-2 sentences on why this specific topic matters for THIS role, grounded in real industry practice.
+- current_gap: 1-2 sentences naming the candidate's SPECIFIC current gap for this exact topic — grounded in what
+  their resume, skill assessment, or interview feedback actually shows (or doesn't show), not a generic "you don't
+  know this yet." If they have partial/adjacent experience, say so specifically instead of treating them as a
+  total beginner.
 - learning_objectives: 2-4 concrete, measurable things the candidate will be able to do after this topic.
-- resources: 2-3 realistic, named learning resources (real course names, official docs, well-known books) — mix
-  free and paid, and vary resource type (Course/Free/Book/Docs/Cert) rather than always picking the same type.
+- milestones: three short, concrete, checkable capability statements for THIS topic specifically — "beginner"
+  (can follow guided material without getting stuck), "intermediate" (can build something real with it mostly
+  unassisted), "advanced" (can debug non-trivial issues and explain real trade-offs) — each one specific to this
+  topic, not generic.
+- resources: 2-3 realistic, named learning resources (real course names, official docs, well-known books, YouTube
+  channels/series, or specific articles) — mix free and paid, and vary resource type (Course/Free/Book/Docs/Cert/
+  Video/Article/Tutorial) rather than always picking the same type. Prefer including at least one video/tutorial
+  and one documentation/article source when realistic for the topic, alongside a deeper course/book option.
 - projects: 1-2 concrete project ideas that apply this topic in a portfolio-worthy way.
 - exercises: 1-2 smaller practical exercises to build the skill incrementally before the project.
+- quiz: 2-3 multiple-choice self-check questions that test real understanding of this specific topic (not trivia
+  or the topic's name) — each with exactly 4 plausible options, a 0-indexed correct_index, and a short explanation
+  of why that answer is correct. These let the candidate self-assess before moving on.
 - estimated_hours: a realistic integer number of hours to reach working competence.
 - priority: "critical" if this closes an identified skill gap or is core to the role, "high" if it's important but
   not urgent, "medium" if it rounds out the profile.
@@ -176,12 +221,27 @@ engineer or hiring manager in this field would actually endorse, not generic adv
 """
 
 
+_TOPIC_REQUIRED_KEYS = (
+    "title", "why_it_matters", "current_gap", "learning_objectives", "milestones",
+    "resources", "projects", "exercises", "quiz", "estimated_hours", "priority",
+)
+
+
 def _validate_roadmap(result: dict) -> bool:
     stages = result.get("stages", [])
     if len(stages) != 4:
         return False
     if [s.get("stage") for s in stages] != STAGE_NAMES:
         return False
+    for stage in stages:
+        topics = stage.get("topics", [])
+        if len(topics) != TOPICS_PER_STAGE:
+            return False
+        for topic in topics:
+            if not all(key in topic for key in _TOPIC_REQUIRED_KEYS):
+                return False
+            if not all(level in topic["milestones"] for level in ("beginner", "intermediate", "advanced")):
+                return False
     return True
 
 
@@ -212,15 +272,22 @@ def _roadmap_via_groq(
         '"Foundation", "Intermediate", "Advanced", "Job Ready". Each stage object needs "stage" (string), '
         '"description" (string), "estimated_duration" (string), "milestone" (string), and "topics" (an array of '
         f'exactly {TOPICS_PER_STAGE} objects, each with "title" (string), "why_it_matters" (string), '
-        '"learning_objectives" (array of strings), "resources" (array of objects with "name", "type", "provider" '
-        'strings), "projects" (array of strings), "exercises" (array of strings), "estimated_hours" (integer), '
-        'and "priority" ("critical", "high", or "medium"))'
+        '"current_gap" (string), "learning_objectives" (array of strings), "milestones" (object with "beginner", '
+        '"intermediate", "advanced" string fields), "resources" (array of objects with "name", "type" — one of '
+        'Course/Free/Book/Docs/Cert/Video/Article/Tutorial — and "provider" strings), "projects" (array of '
+        'strings), "exercises" (array of strings), "quiz" (array of 2-3 objects, each with "question" (string), '
+        '"options" (array of exactly 4 strings), "correct_index" (0-indexed integer), and "explanation" (string)), '
+        '"estimated_hours" (integer), and "priority" ("critical", "high", or "medium"))'
     )
 
     client = groq_client(api_key)
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
+        # Groq's free tier caps at 12000 tokens/minute for prompt + max_tokens COMBINED (not
+        # just completion) — 12000 here left no headroom for the prompt itself and got rejected
+        # outright with a 413. 8000 leaves comfortable room for the (often 1000-2000 token)
+        # prompt while still fitting the larger per-topic content (current_gap/milestones/quiz).
         max_tokens=8000,
         response_format={"type": "json_object"},
     )
@@ -287,7 +354,9 @@ def generate_learning_roadmap(
                     missing_skills, jd_content, skill_assessment_summary, interview_summary,
                 ),
                 config=genai_types.GenerateContentConfig(
-                    max_output_tokens=8000,
+                    # Raised from 8000 — current_gap/milestones/quiz roughly doubled the
+                    # per-topic output size across all 16 topics in a roadmap.
+                    max_output_tokens=12000,
                     response_mime_type="application/json",
                     response_json_schema=ROADMAP_SCHEMA,
                     thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),

@@ -22,13 +22,33 @@ def _topic(i):
     return {
         "title": f"Topic {i}",
         "why_it_matters": "It matters.",
+        "current_gap": "Not yet demonstrated.",
         "learning_objectives": ["Objective A", "Objective B"],
+        "milestones": {
+            "beginner": "Can follow a guided tutorial.",
+            "intermediate": "Can build a small project mostly unassisted.",
+            "advanced": "Can debug non-trivial issues and explain trade-offs.",
+        },
         "resources": [
             {"name": "Resource A", "type": "Course", "provider": "Udemy"},
             {"name": "Resource B", "type": "Free", "provider": "Docs"},
         ],
         "projects": ["Project A"],
         "exercises": ["Exercise A"],
+        "quiz": [
+            {
+                "question": "What is the point?",
+                "options": ["A", "B", "C", "D"],
+                "correct_index": 0,
+                "explanation": "Because A.",
+            },
+            {
+                "question": "What next?",
+                "options": ["A", "B", "C", "D"],
+                "correct_index": 1,
+                "explanation": "Because B.",
+            },
+        ],
         "estimated_hours": 10,
         "priority": "high",
     }
@@ -97,6 +117,25 @@ def test_wrong_stage_order_returns_none(mock_client_cls, monkeypatch):
 
     shuffled = ["Intermediate", "Foundation", "Job Ready", "Advanced"]
     bad_payload = {"stages": [_stage(name) for name in shuffled]}
+    mock_client = Mock()
+    mock_response = Mock()
+    mock_response.text = json.dumps(bad_payload)
+    mock_client.models.generate_content.return_value = mock_response
+    mock_client_cls.return_value = mock_client
+
+    result = generate_learning_roadmap("Backend Engineer", "Tech", "mid", "resume", ["Python"], ["Docker"], "jd")
+    assert result is None
+
+
+@patch("app.services.learning_roadmap_ai.genai.Client")
+def test_topic_missing_quiz_returns_none(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    incomplete_topic = _topic(0)
+    del incomplete_topic["quiz"]
+    bad_stage = {**_stage("Foundation"), "topics": [incomplete_topic] + [_topic(i) for i in range(1, TOPICS_PER_STAGE)]}
+    bad_payload = {"stages": [bad_stage] + [_stage(name) for name in STAGE_NAMES[1:]]}
+
     mock_client = Mock()
     mock_response = Mock()
     mock_response.text = json.dumps(bad_payload)

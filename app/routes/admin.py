@@ -6,7 +6,7 @@ from sqlalchemy import func, cast, Date
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.models import User, Resume, JobDescription, AnalysisResult
+from app.models.models import User, JobDescription, AnalysisResult
 from app.models.admin_models import Report, AppSetting
 from app.security import get_current_user, require_admin
 from app.services.admin_analytics import compute_top_missing_skills
@@ -22,19 +22,6 @@ reports_router = APIRouter(tags=["Reports"])
 # ---------------------------------------------------------------------------
 # Shared serialization helpers
 # ---------------------------------------------------------------------------
-
-def _serialize_user(db: Session, user: User) -> dict:
-    resumes_count = db.query(func.count(Resume.id)).filter(Resume.user_id == user.id).scalar() or 0
-    return {
-        "id": user.id,
-        "email": user.email,
-        "fullName": user.full_name,
-        "role": user.role,
-        "status": user.status,
-        "createdAt": user.created_at,
-        "resumesCount": resumes_count,
-    }
-
 
 def _serialize_report(report: Report, reporter_email: str | None) -> dict:
     return {
@@ -67,76 +54,6 @@ def _get_or_create_settings(db: Session) -> AppSetting:
         db.commit()
         db.refresh(row)
     return row
-
-
-# ---------------------------------------------------------------------------
-# Users
-# ---------------------------------------------------------------------------
-
-@router.get("/users")
-def list_users(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    try:
-        users = db.query(User).order_by(User.id).all()
-        return [_serialize_user(db, user) for user in users]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching users: {str(e)}")
-
-
-class UserUpdateInput(BaseModel):
-    fullName: str | None = None
-    role: str | None = None
-
-
-@router.patch("/users/{user_id}")
-def update_user(
-    user_id: int,
-    data: UserUpdateInput,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        if data.fullName is not None:
-            user.full_name = data.fullName
-        if data.role is not None:
-            user.role = data.role
-
-        db.commit()
-        db.refresh(user)
-        return _serialize_user(db, user)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating user: {str(e)}")
-
-
-class UserStatusInput(BaseModel):
-    status: str
-
-
-@router.patch("/users/{user_id}/status")
-def set_user_status(
-    user_id: int,
-    data: UserStatusInput,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        user.status = data.status
-        db.commit()
-        db.refresh(user)
-        return _serialize_user(db, user)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating user status: {str(e)}")
 
 
 # ---------------------------------------------------------------------------

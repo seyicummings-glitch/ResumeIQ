@@ -17,6 +17,15 @@ PASSWORD_RESET_EXPIRE_MINUTES = 5
 oauth2_scheme = HTTPBearer()
 
 
+def normalize_email(email: str) -> str:
+    """Emails are case-insensitive in practice (RFC 5321 technically allows a
+    case-sensitive local part, but no mainstream provider treats it that way)
+    — every place that looks up or stores a User.email must go through this
+    first, or a user could register "Test@x.com" after "test@x.com" already
+    exists and end up with two accounts for what's really the same address."""
+    return email.strip().lower()
+
+
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 

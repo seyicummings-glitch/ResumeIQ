@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import requests
 from bs4 import BeautifulSoup
-from app.services.job_description_parser import parse_job_description
+from app.services.job_description_parser import parse_job_description, derive_job_title
 from app.services.job_description_ai import parse_job_description_ai
 from app.services.resume_parser import extract_resume_text
 from app.services.platform_settings import is_ai_enabled
@@ -158,15 +158,32 @@ def parse_jd_url(data: JobDescriptionURLInput, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error processing URL: {str(e)}")
 
 
+def _auto_extract_title(content: str, db: Session) -> str | None:
+    """Best-effort title extraction when the client didn't send one — tries the AI parser
+    first (real title, e.g. "Backend Developer"), then the safe first-line heuristic. Returns
+    None (not the display placeholder) when nothing usable was found, so the caller can tell
+    the difference between "we have a title" and "we don't"."""
+    ai_result = parse_job_description_ai(content, ai_enabled=is_ai_enabled(db))
+    if ai_result and ai_result.get("title"):
+        return ai_result["title"]
+    heuristic_title = derive_job_title(None, content)
+    return heuristic_title if heuristic_title != "Untitled job description" else None
+
+
 @router.post("/save", response_model=JobDescriptionResponse)
 def save_job_description(
     data: JobDescriptionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # The frontend resolves a title before calling this (AI-extracted or typed by the user) —
+    # this is a safety net for any caller that didn't, so a JobDescription is never saved
+    # with an avoidably-missing title.
+    title = data.title or _auto_extract_title(data.content, db)
+
     new_jd = JobDescription(
         user_id=current_user.id,
-        title=data.title,
+        title=title,
         content=data.content
     )
     db.add(new_jd)

@@ -14,6 +14,7 @@ next question to ask (or the closing remarks once the session is done). The
 frontend shows these as two distinct pieces rather than a growing chat log.
 """
 import os
+import re
 import json
 import logging
 from google import genai
@@ -50,12 +51,50 @@ def _gemini_api_keys() -> list[str]:
 TURN_SCHEMA = {
     "type": "object",
     "properties": {
+        "is_clarification_request": {"type": "boolean"},
         "feedback": {"type": "string"},
         "question": {"type": "string"},
+        "questions_answered": {"type": "integer"},
     },
-    "required": ["feedback", "question"],
+    "required": ["is_clarification_request", "feedback", "question", "questions_answered"],
     "additionalProperties": False,
 }
+
+# Lightweight, keyword-based detector used only by the rule-based fallback (no AI available to
+# actually understand intent). The AI path does this classification itself, contextually, via
+# the "is_clarification_request" field in TURN_SCHEMA — this regex exists purely so the
+# fallback doesn't fall into the same bug (treating "can you explain that?" as a weak answer).
+_CLARIFICATION_PATTERN = re.compile(
+    r"\b("
+    r"explain|"
+    r"don'?t understand|do not understand|"
+    r"simplify|"
+    r"re-?phrase|"
+    r"ask (it |that )?(another|different) way|"
+    r"say (it|that) (again|differently)|"
+    r"what do you mean|"
+    r"can you clarify|clarify (that|this|it)|"
+    r"give (me |us )?an example|"
+    r"not sure (what|i understand)|"
+    r"could you repeat|can you repeat|"
+    r"come again"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_clarification_request(text: str) -> bool:
+    return bool(text) and bool(_CLARIFICATION_PATTERN.search(text))
+
+
+def _count_real_answers(conversation: list) -> int:
+    """How many questions the candidate has actually attempted to answer — clarification
+    requests ("can you explain that?", "give me an example") don't count, so a candidate
+    who's just asking for help isn't silently marked as having answered and skipped ahead."""
+    return len([
+        m for m in conversation
+        if m.get("role") == "candidate" and not _is_clarification_request(m.get("content", ""))
+    ])
 
 
 def _build_system_prompt(resume_text: str, jd_content: str, jd_title: str, missing_skills: list, preferred_language: str | None) -> str:
@@ -72,7 +111,10 @@ def _build_system_prompt(resume_text: str, jd_content: str, jd_title: str, missi
             "- Default to English for your first message. From then on, always match whichever language the "
             "candidate actually speaks their answers in, even if they switch mid-conversation."
         )
-    return f"""You are an experienced, rigorous interviewer conducting a realistic, appropriately difficult mock interview for a {jd_title or "the candidate's target"} position.
+    return f"""You are an experienced, rigorous interviewer — the kind a real company would actually send: a mix of
+recruiter, hiring manager, and technical interviewer — conducting a realistic, appropriately challenging mock
+interview for a {jd_title or "the candidate's target"} position. This is a real conversation, not a static quiz:
+listen to what the candidate actually says, remember it, and let it shape what you ask and say next.
 
 Candidate's resume:
 {resume_text[:4000] if resume_text else "(not provided)"}
@@ -82,28 +124,84 @@ Job description:
 
 Skills the job wants that aren't clearly on the resume: {gaps}
 
-You must respond with two fields every turn: "feedback" and "question".
+You must respond with four fields every turn: "is_clarification_request", "feedback", "question", and
+"questions_answered".
+
+STEP 1 — before anything else, classify the candidate's most recent message (skip this on the very first turn,
+before they've said anything at all):
+- Is it a genuine attempt to answer the question you just asked — even a short, weak, vague, or wrong one?
+  That still counts as an attempt.
+- OR is it instead asking YOU for help before attempting one — e.g. "can you explain that?", "I don't
+  understand", "can you rephrase it?", "simplify it", "ask it another way", "what do you mean by X?", "give me
+  an example", "can you repeat that?" — with no real attempt at an answer alongside it?
+A message that both asks for help AND makes a real attempt (e.g. "I think it's about caching, but can you
+clarify what you mean by 'distributed'?") is an answer attempt, not a clarification request — address their
+question as part of your feedback/next question, but still evaluate what they attempted.
+
+A real senior interviewer never penalizes a candidate for asking a clarifying question — that's normal,
+professional behavior, not evasion. Getting this classification right matters: misreading a clarification
+request as a weak answer and evaluating it anyway is exactly the mistake to avoid.
+
+is_clarification_request:
+- true or false, per the classification in STEP 1. On the very first turn, set this to false.
 
 feedback:
-- On the very first turn (the candidate hasn't answered anything yet), set feedback to an empty string.
-- On every later turn, critique the candidate's PREVIOUS answer specifically: 2-4 sentences covering (a) what
-  was genuinely strong about it, if anything, (b) what a strong answer to that question would have included
-  that theirs didn't (specifics, metrics, structure, depth), and (c) one concrete, actionable suggestion for
-  improving that kind of answer. Be honest and specific — reference what they actually said, never generic
-  platitudes like "good job" or "keep practicing."
-- If the question had a factually correct or technically right answer, open by plainly stating whether the
-  candidate's answer was correct, partially correct, or wrong — don't bury this in vague language or let a
-  wrong answer sound like a pass. If they got it wrong, say so directly and then state what the correct
-  answer actually is before moving on to the rest of the critique.
+- If is_clarification_request is true: set feedback to an empty string. There is nothing to evaluate yet —
+  they haven't answered.
+- On the very first turn: empty string.
+- Otherwise (a genuine answer attempt was just given): critique it specifically — 2-4 sentences covering (a)
+  what was genuinely strong about it, if anything, (b) what a strong answer to that question would have
+  included that theirs didn't (specifics, metrics, structure, depth), and (c) one concrete, actionable
+  suggestion for improving that kind of answer. Be honest and specific — reference what they actually said,
+  never generic platitudes like "good job" or "keep practicing."
+  - Where relevant to the question, let your critique reflect the dimension(s) it actually tested — technical
+    accuracy/depth, problem-solving approach, clarity and structure of communication, or confidence — without
+    turning it into a rigid checklist every time; touch on whichever of these genuinely apply.
+  - If the question had a factually correct or technically right answer, open by plainly stating whether the
+    candidate's answer was correct, partially correct, or wrong — don't bury this in vague language or let a
+    wrong answer sound like a pass. If they got it wrong, say so directly and then state what the correct
+    answer actually is before moving on to the rest of the critique.
+  - If the answer was short, vague, or thin (but still a real attempt, not a clarification request), do NOT
+    claim you "didn't get an answer" or that nothing was said — engage with what they DID say and be explicit
+    that it needs more depth, rather than treating it as if it didn't happen.
 
 question:
-- Exactly ONE question, specific and appropriately challenging for the seniority level implied by the resume
-  and job description — not a generic templated question. Ground it in specifics: their actual resume history,
-  technical depth on skills they listed, system-design/architecture thinking, or the gap skills above.
-- Vary question type and difficulty across the session — don't ask two similarly-shaped questions in a row,
-  and escalate difficulty as the interview progresses rather than staying at the same level throughout.
-- Once roughly {MAX_QUESTIONS} exchanges have happened, instead of a new question, put a short, honest
+- If is_clarification_request is true: do NOT ask a new question and do NOT move on. Instead, help them
+  understand the SAME question you just asked, like a patient real interviewer would — rephrase it in
+  simpler, more concrete language, add brief context on why it's being asked, and/or give a short concrete
+  example if that would help, then ask the same underlying question again in this clearer form. Respond
+  warmly ("Sure, let me put that another way...", "No problem — for example..."), never as if this were a
+  failure on their part. If they've already asked for clarification on this SAME question before (check the
+  conversation history), go even simpler and more concrete this time — break it into a smaller, more specific
+  sub-question — rather than repeating the same rephrasing again.
+- Otherwise, exactly ONE question. Two kinds are valid, and you should choose based on the candidate's last
+  answer:
+  (1) A direct follow-up that digs into what they just said — when their answer was vague, thin, name-dropped
+  a project/technology without detail, or (for a behavioral question) lacked a clear situation/task/action/
+  result. Ask for the specific missing piece (e.g. "What was the measurable result?" or "Walk me through the
+  actual steps you took") rather than the STAR acronym itself — most candidates respond better to a concrete
+  prompt than to jargon.
+  (2) A fresh question once you've gotten sufficient depth on the current topic — specific and appropriately
+  challenging for the seniority level implied by the resume and job description, never generic or templated.
+  Ground it in specifics: their actual resume history, technical depth on skills they listed, system-design/
+  architecture thinking, behavioral/soft-skill scenarios, or the gap skills above.
+  - Cover a realistic mix across the session — technical/hard-skill questions, behavioral questions about past
+    experience, and role- or domain-specific questions grounded in the job description — the way a real
+    interview loop would, not one category repeated the whole time.
+  - Never repeat a question, or a near-duplicate of one, you already asked earlier in this conversation — check
+    the conversation history above before choosing.
+  - Adapt difficulty to how the candidate is actually doing, not just a fixed escalation: if their recent
+    answers have been strong, specific, and confident, push into harder, more probing territory; if they've
+    been struggling, giving thin answers, or seem to be floundering, ease up slightly — ask something more
+    approachable, or break a hard topic into a smaller, more concrete piece — before ramping back up.
+- Once questions_answered reaches roughly {MAX_QUESTIONS}, instead of a new question, put a short, honest
   closing assessment here (building on your last feedback) and thank them — no question in that case.
+
+questions_answered:
+- A running integer count of how many questions the candidate has GENUINELY answered so far in this entire
+  conversation — count every past exchange where they made a real attempt, from the full history above.
+  Clarification requests never count, whether past ones or this turn's. On the very first turn, this is 0; if
+  this turn is itself a clarification request, this stays the same as it was before this turn (don't count it).
 {language_rule}
 """
 
@@ -114,7 +212,6 @@ def _fallback_questions(missing_skills: list, resume_skills: list, jd_title: str
 
 def _fallback_reply(conversation: list, missing_skills: list, resume_skills: list, jd_title: str) -> dict:
     questions = _fallback_questions(missing_skills, resume_skills, jd_title)
-    answered_count = len([m for m in conversation if m.get("role") == "candidate"])
 
     if not questions:
         return {
@@ -124,6 +221,8 @@ def _fallback_reply(conversation: list, missing_skills: list, resume_skills: lis
             "done": True,
         }
 
+    answered_count = _count_real_answers(conversation)
+
     if answered_count >= len(questions):
         return {
             "feedback": "",
@@ -132,9 +231,24 @@ def _fallback_reply(conversation: list, missing_skills: list, resume_skills: lis
             "done": True,
         }
 
-    q = questions[answered_count]
+    current_question = questions[answered_count]["question"]
+    last_candidate_message = next((m for m in reversed(conversation) if m.get("role") == "candidate"), None)
+
+    if last_candidate_message and _is_clarification_request(last_candidate_message.get("content", "")):
+        # No AI available to actually rephrase it, but the fallback can at least not misread
+        # this as a weak answer and skip ahead — repeat the same question and stay put.
+        return {
+            "feedback": "",
+            "question": (
+                f"No problem — here's the question again: {current_question} "
+                "There's no need for a perfect answer, just walk me through your thinking in your own words."
+            ),
+            "source": "fallback",
+            "done": False,
+        }
+
     feedback = "" if answered_count == 0 else "Thanks for sharing that — without AI feedback configured, I can't critique your specific answer, but here's the next question."
-    return {"feedback": feedback, "question": q["question"], "source": "fallback", "done": False}
+    return {"feedback": feedback, "question": current_question, "source": "fallback", "done": False}
 
 
 def _interviewer_reply_via_groq(
@@ -155,7 +269,10 @@ def _interviewer_reply_via_groq(
 
     system_prompt = _build_system_prompt(
         resume_text, jd_content, jd_title, missing_skills, preferred_language
-    ) + groq_json_instructions('"feedback" (string), "question" (string)')
+    ) + groq_json_instructions(
+        '"is_clarification_request" (boolean), "feedback" (string), "question" (string), '
+        '"questions_answered" (integer)'
+    )
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(
@@ -172,7 +289,7 @@ def _interviewer_reply_via_groq(
         response_format={"type": "json_object"},
     )
     parsed = json.loads(response.choices[0].message.content)
-    if "feedback" not in parsed or "question" not in parsed:
+    if not all(key in parsed for key in ("is_clarification_request", "feedback", "question", "questions_answered")):
         raise ValueError("Groq response missing required keys")
     return parsed
 
@@ -189,8 +306,7 @@ def _try_groq_interviewer_reply(
     to the rule-based question bank instead of surfacing an error."""
     try:
         parsed = _interviewer_reply_via_groq(resume_text, jd_content, jd_title, missing_skills, conversation, preferred_language)
-        answered_count = len([m for m in conversation if m.get("role") == "candidate"])
-        done = answered_count >= MAX_QUESTIONS
+        done = parsed["questions_answered"] >= MAX_QUESTIONS
         logger.info("ai_interviewer.get_interviewer_reply served by groq (gemini quota/rate-limit hit)")
         return {"feedback": parsed["feedback"], "question": parsed["question"], "source": "ai", "done": done}
     except Exception:
@@ -245,9 +361,7 @@ def get_interviewer_reply(
                 ),
             )
             parsed = json.loads(response.text)
-
-            answered_count = len([m for m in conversation if m.get("role") == "candidate"])
-            done = answered_count >= MAX_QUESTIONS
+            done = parsed["questions_answered"] >= MAX_QUESTIONS
 
             logger.info("ai_interviewer.get_interviewer_reply served by gemini")
             return {"feedback": parsed["feedback"], "question": parsed["question"], "source": "ai", "done": done}

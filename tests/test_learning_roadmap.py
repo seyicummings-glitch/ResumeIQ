@@ -77,11 +77,32 @@ def test_build_roadmap_topic_shape_has_all_required_fields():
     result = build_roadmap(["Docker"], [])
     topic = result["stages"][1]["topics"][0]
     required_fields = {
-        "title", "why_it_matters", "learning_objectives", "resources",
-        "projects", "exercises", "estimated_hours", "priority",
+        "title", "why_it_matters", "current_gap", "learning_objectives", "milestones", "resources",
+        "projects", "exercises", "quiz", "estimated_hours", "priority",
     }
     assert required_fields <= set(topic.keys())
     assert len(topic["resources"]) == 3
+
+
+def test_build_roadmap_topic_milestones_and_quiz_are_well_formed():
+    result = build_roadmap(["Docker"], [])
+    for stage in result["stages"]:
+        for topic in stage["topics"]:
+            assert {"beginner", "intermediate", "advanced"} <= set(topic["milestones"].keys())
+            assert len(topic["quiz"]) >= 2
+            for question in topic["quiz"]:
+                assert len(question["options"]) == 4
+                assert 0 <= question["correct_index"] < 4
+
+
+def test_build_roadmap_does_not_mutate_shared_fixed_topic_lists():
+    # Foundation/Job Ready topics are shared module-level lists reused across every call —
+    # calling build_roadmap() repeatedly must not leak mutated state into those shared dicts.
+    from app.services.learning_roadmap import _FOUNDATION_TOPICS
+
+    build_roadmap(["Docker"], [])
+    build_roadmap(["Kubernetes"], [])
+    assert "current_gap" not in _FOUNDATION_TOPICS[0]
 
 
 def test_build_roadmap_stage_shape_has_required_fields():

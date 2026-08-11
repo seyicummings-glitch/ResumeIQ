@@ -1,4 +1,7 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, status
+﻿from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import User
@@ -20,6 +23,7 @@ from app.security import (
     create_password_reset_token,
     verify_password_reset_token,
     require_admin,
+    normalize_email,
 )
 from app.services.email_service import is_email_configured, send_password_reset_email
 
@@ -28,29 +32,46 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == user.email).first()
+    email = normalize_email(user.email)
+    existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     new_user = User(
-        email=user.email,
+        email=email,
         hashed_password=hash_password(user.password),
         full_name=user.full_name
     )
     db.add(new_user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Guards the race between the existing_user check above and this commit
+        # (two concurrent registrations for the same email) — the DB's unique
+        # constraint is the real guarantee, this just keeps the error friendly.
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Email already registered")
     db.refresh(new_user)
     return new_user
 
 
 @router.post("/login", response_model=Token)
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == credentials.email).first()
+    user = db.query(User).filter(User.email == normalize_email(credentials.email)).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
+
+    if user.status in ("deactivated", "deleted"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been deactivated. Contact support if you believe this is a mistake."
+        )
+
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
 
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -67,11 +88,12 @@ def update_me(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if data.email is not None and data.email != current_user.email:
-        existing = db.query(User).filter(User.email == data.email).first()
+    if data.email is not None and normalize_email(data.email) != current_user.email:
+        new_email = normalize_email(data.email)
+        existing = db.query(User).filter(User.email == new_email).first()
         if existing:
             raise HTTPException(status_code=400, detail="That email is already registered to another account.")
-        current_user.email = data.email
+        current_user.email = new_email
 
     profile_fields = data.model_dump(exclude_unset=True, exclude={"email"})
     for field, value in profile_fields.items():
@@ -104,7 +126,7 @@ def logout(current_user: User = Depends(get_current_user)):
 
 @router.post("/password-reset/request")
 def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
+    user = db.query(User).filter(User.email == normalize_email(data.email)).first()
     if not user:
         return {"message": "If that email exists, a reset link has been sent to it."}
 

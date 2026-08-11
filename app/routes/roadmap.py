@@ -13,6 +13,7 @@ from app.services.resume_structurer import extract_skills_list
 from app.services.platform_settings import is_ai_enabled
 from app.services.learning_roadmap import build_roadmap
 from app.services.learning_roadmap_ai import generate_learning_roadmap
+from app.services.skill_resources import fetch_all_resources, get_resource_links
 
 router = APIRouter(prefix="/roadmap", tags=["Learning Roadmap"])
 
@@ -117,6 +118,7 @@ def _serialize_roadmap(db: Session, roadmap: LearningRoadmap, user_id: int) -> d
         RoadmapTopicProgress.roadmap_id == roadmap.id
     ).all()
     completed_keys = {row.topic_key for row in progress_rows if row.completed}
+    all_skill_resources = fetch_all_resources(db)
 
     total_hours = 0
     done_count = 0
@@ -131,7 +133,8 @@ def _serialize_roadmap(db: Session, roadmap: LearningRoadmap, user_id: int) -> d
             total_count += 1
             if done:
                 done_count += 1
-            topics.append({**topic, "done": done})
+            resource_links = get_resource_links(topic["title"], all_skill_resources)
+            topics.append({**topic, "done": done, "resource_links": resource_links})
         stages.append({**stage, "topics": topics})
 
     return {

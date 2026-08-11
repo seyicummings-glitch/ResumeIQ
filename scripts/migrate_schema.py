@@ -41,6 +41,11 @@ STATEMENTS = [
     "ALTER TABLE skill_assessment_attempts ADD COLUMN IF NOT EXISTS session_id INTEGER REFERENCES skill_assessment_sessions(id)",
     "ALTER TABLE skill_assessment_attempts ADD COLUMN IF NOT EXISTS source VARCHAR",
     "ALTER TABLE skill_assessment_attempts ADD COLUMN IF NOT EXISTS question_feedback JSON",
+    # Admin panel Wave 1 — user profile/activity fields, resume provenance
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR DEFAULT 'free'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ",
+    "ALTER TABLE resumes ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'upload'",
 ]
 
 
