@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useAuth } from '../../auth/AuthContext'
 import { ApiError } from '../../api/client'
+import { passwordSchema, PASSWORD_REQUIREMENTS_TEXT } from '../../lib/passwordValidation'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
@@ -14,7 +15,7 @@ const schema = z
   .object({
     fullName: z.string().optional(),
     email: z.string().min(1, 'Email is required').email('Enter a valid email address'),
-    password: z.string().min(8, 'Password must be 8 characters').max(8, 'Password must be 8 characters'),
+    password: passwordSchema,
     confirmPassword: z.string().min(1, 'Please confirm your password'),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -77,8 +78,8 @@ export default function RegisterPage() {
             type="password"
             autoComplete="new-password"
             required
-            maxLength={8}
-            hint="Must be 8 characters"
+            maxLength={20}
+            hint={PASSWORD_REQUIREMENTS_TEXT}
             error={errors.password?.message}
             {...register('password')}
           />

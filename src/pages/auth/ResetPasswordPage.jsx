@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { confirmPasswordReset } from '../../api/auth'
+import { passwordSchema, PASSWORD_REQUIREMENTS_TEXT } from '../../lib/passwordValidation'
 import Card from '../../components/ui/Card'
 import Input from '../../components/ui/Input'
 import Button from '../../components/ui/Button'
@@ -11,7 +12,7 @@ import { useToast } from '../../components/ui/Toast'
 
 const schema = z
   .object({
-    newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+    newPassword: passwordSchema,
     confirmPassword: z.string().min(1, 'Please confirm your password'),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
@@ -67,7 +68,8 @@ export default function ResetPasswordPage() {
             type="password"
             autoComplete="new-password"
             required
-            hint="At least 8 characters"
+            maxLength={20}
+            hint={PASSWORD_REQUIREMENTS_TEXT}
             error={errors.newPassword?.message}
             {...register('newPassword')}
           />

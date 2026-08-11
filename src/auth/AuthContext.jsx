@@ -6,9 +6,21 @@ import { getToken, setToken, clearToken, isTokenExpired } from './tokenStorage'
 
 const AuthContext = createContext(null)
 
+// Admin "view as user" mode — a pure presentation toggle, not a real
+// permission change. The admin's JWT/role/session never change; this just
+// controls what the frontend shows/routes to. Persisted per-tab (not
+// localStorage) so a reload during testing doesn't kick the admin back to
+// the admin view, but it naturally clears when the tab closes or on logout.
+const VIEW_MODE_KEY = 'resumeiq_admin_view_mode'
+
+function getStoredViewMode() {
+  return sessionStorage.getItem(VIEW_MODE_KEY) === 'user' ? 'user' : 'admin'
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [viewMode, setViewMode] = useState(getStoredViewMode)
   const navigate = useNavigate()
 
   const handleUnauthorized = useCallback(() => {
@@ -59,7 +71,21 @@ export function AuthProvider({ children }) {
     authApi.logout().catch(() => {})
     clearToken()
     setUser(null)
+    sessionStorage.removeItem(VIEW_MODE_KEY)
+    setViewMode('admin')
   }, [])
+
+  const switchToUserView = useCallback(() => {
+    sessionStorage.setItem(VIEW_MODE_KEY, 'user')
+    setViewMode('user')
+    navigate('/dashboard')
+  }, [navigate])
+
+  const switchToAdminView = useCallback(() => {
+    sessionStorage.removeItem(VIEW_MODE_KEY)
+    setViewMode('admin')
+    navigate('/admin')
+  }, [navigate])
 
   const refreshUser = useCallback(async () => {
     const me = await authApi.getMe()
@@ -67,10 +93,18 @@ export function AuthProvider({ children }) {
     return me
   }, [])
 
+  const isAdmin = user?.role === 'admin'
+
   const value = {
     user,
     isAuthenticated: Boolean(user),
-    isAdmin: user?.role === 'admin',
+    isAdmin,
+    // Effective admin state for nav/route gating — false while an admin has
+    // switched to "view as user" mode, even though their real role is still admin.
+    isAdminView: isAdmin && viewMode === 'admin',
+    viewMode,
+    switchToUserView,
+    switchToAdminView,
     isLoading,
     login,
     register,

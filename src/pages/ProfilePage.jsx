@@ -7,6 +7,7 @@ import clsx from 'clsx'
 import { useProfile, useUpdateProfile, useChangePassword } from '../hooks/useProfile'
 import { useAuth } from '../auth/AuthContext'
 import { ApiError } from '../api/client'
+import { passwordSchema, PASSWORD_REQUIREMENTS_TEXT } from '../lib/passwordValidation'
 import Card from '../components/ui/Card'
 import Input from '../components/ui/Input'
 import PhoneInput from '../components/ui/PhoneInput'
@@ -49,10 +50,10 @@ const profileSchema = z.object({
   careerGoals: z.string().optional(),
 })
 
-const passwordSchema = z
+const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1, 'Current password is required'),
-    newPassword: z.string().min(8, 'Password must be 8 characters').max(8, 'Password must be 8 characters'),
+    newPassword: passwordSchema,
     confirmNewPassword: z.string().min(1, 'Please confirm your new password'),
   })
   .refine((data) => data.newPassword === data.confirmNewPassword, {
@@ -206,7 +207,7 @@ function SecurityTab() {
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm({ resolver: zodResolver(passwordSchema) })
+  } = useForm({ resolver: zodResolver(changePasswordSchema) })
 
   async function onSubmit(values) {
     setFormError(null)
@@ -246,8 +247,8 @@ function SecurityTab() {
             type="password"
             autoComplete="new-password"
             required
-            maxLength={8}
-            hint="Must be 8 characters"
+            maxLength={20}
+            hint={PASSWORD_REQUIREMENTS_TEXT}
             error={errors.newPassword?.message}
             {...register('newPassword')}
           />
@@ -256,7 +257,7 @@ function SecurityTab() {
             type="password"
             autoComplete="new-password"
             required
-            maxLength={8}
+            maxLength={20}
             error={errors.confirmNewPassword?.message}
             {...register('confirmNewPassword')}
           />

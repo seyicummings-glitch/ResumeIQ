@@ -1,7 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Users, Flag, BarChart3, Settings, CreditCard, GraduationCap } from 'lucide-react'
+import { LayoutDashboard, Users, Flag, BarChart3, Settings, CreditCard, GraduationCap, UserRoundCog } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../auth/AuthContext'
+import Button from '../ui/Button'
 
 // Grows across the admin panel build-out — each wave adds its own group/leaf
 // once the page it links to actually exists, so there are never dead links.
@@ -37,13 +38,19 @@ const ADMIN_NAV_GROUPS = [
 ]
 
 export default function AdminNav() {
-  const { user } = useAuth()
+  const { user, switchToUserView } = useAuth()
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-text-h">Admin panel</h1>
-        <p className="mt-1 text-sm text-text">Signed in as {user?.full_name || user?.email}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-text-h">Admin panel</h1>
+          <p className="mt-1 text-sm text-text">Signed in as {user?.full_name || user?.email}</p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={switchToUserView}>
+          <UserRoundCog size={14} aria-hidden="true" />
+          Switch to User View
+        </Button>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">

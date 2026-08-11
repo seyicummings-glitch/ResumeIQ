@@ -10,7 +10,7 @@ import Spinner from '../components/ui/Spinner'
  * backend's own require_admin dependency instead of trusting local state alone.
  */
 export default function AdminRoute() {
-  const { isAuthenticated, isAdmin, isLoading } = useAuth()
+  const { isAuthenticated, isAdmin, isAdminView, isLoading } = useAuth()
 
   const adminCheck = useQuery({
     queryKey: ['admin-only-check'],
@@ -30,6 +30,10 @@ export default function AdminRoute() {
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
   if (!isAdmin) return <Navigate to="/403" replace />
+  // A real admin who's switched to "view as user" mode should be bounced to
+  // the normal dashboard, not shown a 403 — they have access, they've just
+  // chosen not to use it right now.
+  if (!isAdminView) return <Navigate to="/dashboard" replace />
 
   if (adminCheck.isLoading) {
     return (

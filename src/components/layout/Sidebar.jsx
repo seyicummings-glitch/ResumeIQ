@@ -21,10 +21,10 @@ export const NAV_ITEMS = [
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
-  const { user, logout } = useAuth()
+  const { user, logout, isAdminView } = useAuth()
   const navigate = useNavigate()
 
-  const visibleNav = NAV_ITEMS.filter((item) => !item.adminOnly || user?.role === 'admin')
+  const visibleNav = NAV_ITEMS.filter((item) => !item.adminOnly || isAdminView)
 
   function handleLogout() {
     logout()
