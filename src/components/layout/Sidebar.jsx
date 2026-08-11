@@ -1,6 +1,26 @@
 import { useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Upload, Clock, User, Shield, LogOut, ChevronLeft, ChevronRight, Brain, MessageSquare, Map, Sparkles, GitCompare, BarChart3 } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Upload,
+  Clock,
+  User,
+  Shield,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+  Brain,
+  MessageSquare,
+  Map,
+  Sparkles,
+  GitCompare,
+  BarChart3,
+  Users,
+  Flag,
+  Settings,
+  CreditCard,
+  GraduationCap,
+} from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../auth/AuthContext'
 import Logo from './Logo'
@@ -19,19 +39,74 @@ export const NAV_ITEMS = [
   { to: '/admin', label: 'Admin panel', icon: Shield, adminOnly: true },
 ]
 
+// Mirrors AdminNav.jsx's grouping — the admin section's navigation lives
+// here, in the one real sidebar, rather than as a second nav column
+// rendered in the content area next to an empty sidebar.
+const ADMIN_NAV_GROUPS = [
+  {
+    label: 'Overview',
+    items: [{ to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true }],
+  },
+  {
+    label: 'People',
+    items: [{ to: '/admin/users', label: 'Users', icon: Users }],
+  },
+  {
+    label: 'Subscriptions',
+    items: [{ to: '/admin/subscriptions/plans', label: 'Plans', icon: CreditCard }],
+  },
+  {
+    label: 'Content & Activity',
+    items: [{ to: '/admin/skill-resources', label: 'Skill Resources', icon: GraduationCap }],
+  },
+  {
+    label: 'Insights',
+    items: [{ to: '/admin/analytics', label: 'Analytics', icon: BarChart3 }],
+  },
+  {
+    label: 'Support',
+    items: [{ to: '/admin/reports', label: 'Reports', icon: Flag }],
+  },
+  {
+    label: 'Configuration',
+    items: [{ to: '/admin/settings', label: 'Settings', icon: Settings }],
+  },
+]
+
+function NavItem({ to, label, icon: Icon, adminOnly, collapsed, end }) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      title={collapsed ? label : undefined}
+      className={({ isActive }) =>
+        clsx(
+          'flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-accent/[0.14] text-accent'
+            : adminOnly
+              ? 'text-danger/80 hover:bg-danger-bg hover:text-danger'
+              : 'text-text hover:bg-border/40 hover:text-text-h'
+        )
+      }
+    >
+      <Icon size={16} strokeWidth={1.8} className="shrink-0" aria-hidden="true" />
+      {!collapsed && <span>{label}</span>}
+    </NavLink>
+  )
+}
+
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const { user, logout, isAdminView } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Inside the admin section, AdminNav's own grouped sidebar is the complete
-  // navigation for that area — showing the regular customer-facing feature
-  // links here too would mean admin and user nav are visually mixed
-  // together, which is exactly what "no visual access to admin functionality
-  // while in User View Mode" (and its inverse, here) is about avoiding.
+  // Inside the admin section, this sidebar switches to the grouped admin nav
+  // instead of the regular customer-facing feature list — one sidebar, two
+  // modes, rather than two nav columns showing at once.
   const inAdminSection = location.pathname.startsWith('/admin')
-  const visibleNav = inAdminSection ? [] : NAV_ITEMS.filter((item) => !item.adminOnly || isAdminView)
+  const visibleNav = NAV_ITEMS.filter((item) => !item.adminOnly || isAdminView)
 
   function handleLogout() {
     logout()
@@ -49,28 +124,28 @@ export default function Sidebar() {
         <Logo collapsed={collapsed} />
       </div>
 
-      <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2" aria-label="Main">
-        {visibleNav.map(({ to, label, icon: Icon, adminOnly }) => (
-          <NavLink
-            key={to}
-            to={to}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              clsx(
-                'flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-accent/[0.14] text-accent'
-                  : adminOnly
-                    ? 'text-danger/80 hover:bg-danger-bg hover:text-danger'
-                    : 'text-text hover:bg-border/40 hover:text-text-h'
-              )
-            }
-          >
-            <Icon size={16} strokeWidth={1.8} className="shrink-0" aria-hidden="true" />
-            {!collapsed && <span>{label}</span>}
-          </NavLink>
-        ))}
-      </nav>
+      {inAdminSection ? (
+        <nav className="flex flex-1 flex-col gap-4 overflow-y-auto p-2" aria-label="Admin">
+          {ADMIN_NAV_GROUPS.map((group) => (
+            <div key={group.label}>
+              {!collapsed && (
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-text/50">{group.label}</p>
+              )}
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((item) => (
+                  <NavItem key={item.to} {...item} collapsed={collapsed} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
+      ) : (
+        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2" aria-label="Main">
+          {visibleNav.map((item) => (
+            <NavItem key={item.to} {...item} collapsed={collapsed} />
+          ))}
+        </nav>
+      )}
 
       <div className="flex flex-col gap-0.5 border-t border-border p-2">
         {!collapsed && (
