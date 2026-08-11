@@ -8,10 +8,14 @@ import GlobalCareerCoach from '../coach/GlobalCareerCoach'
 
 function UserViewBanner({ onReturnToAdmin }) {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-2 bg-accent px-4 py-2 text-center text-sm text-accent-contrast">
+    <div className="flex flex-wrap items-center justify-center gap-3 bg-accent px-4 py-2 text-center text-sm text-accent-contrast">
       <Eye size={14} aria-hidden="true" />
       <span>You are currently viewing ResumeIQ as a user.</span>
-      <button type="button" onClick={onReturnToAdmin} className="font-semibold underline underline-offset-2 hover:opacity-90">
+      <button
+        type="button"
+        onClick={onReturnToAdmin}
+        className="rounded-md bg-accent-contrast px-3 py-1 text-xs font-semibold text-accent transition-opacity hover:opacity-90"
+      >
         Return to Admin View
       </button>
     </div>
