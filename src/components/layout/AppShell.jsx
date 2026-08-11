@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Sun, Moon, User, Eye, Shield } from 'lucide-react'
+import { Sun, Moon, User, Shield } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 import { useTheme } from '../../theme/ThemeContext'
 import SkipToContentLink from './SkipToContentLink'
@@ -7,29 +7,12 @@ import Sidebar, { NAV_ITEMS } from './Sidebar'
 import GlobalCareerCoach from '../coach/GlobalCareerCoach'
 import Button from '../ui/Button'
 
-function UserViewBanner({ onReturnToAdmin }) {
-  return (
-    <div className="flex flex-wrap items-center justify-center gap-3 bg-accent px-4 py-2 text-center text-sm text-accent-contrast">
-      <Eye size={14} aria-hidden="true" />
-      <span>You are currently viewing ResumeIQ as a user.</span>
-      <button
-        type="button"
-        onClick={onReturnToAdmin}
-        className="rounded-md bg-accent-contrast px-3 py-1 text-xs font-semibold text-accent transition-opacity hover:opacity-90"
-      >
-        Return to Admin View
-      </button>
-    </div>
-  )
-}
-
 export default function AppShell() {
-  const { user, isAdmin, viewMode, switchToAdminView } = useAuth()
+  const { user, isAdmin, switchToAdminView } = useAuth()
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
   const isLight = theme === 'light'
-  const isViewingAsUser = isAdmin && viewMode === 'user'
   const onAdminPages = location.pathname.startsWith('/admin')
 
   const currentLabel = NAV_ITEMS.find((item) => location.pathname.startsWith(item.to))?.label ?? 'ResumeIQ'
@@ -39,9 +22,7 @@ export default function AppShell() {
       <SkipToContentLink />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="sticky top-0 z-10">
-          {isViewingAsUser && <UserViewBanner onReturnToAdmin={switchToAdminView} />}
-          <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg px-6">
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg px-6">
             <span className="font-mono text-xs text-text">{currentLabel}</span>
             <div className="flex items-center gap-2">
               {isAdmin && !onAdminPages && (
@@ -75,8 +56,7 @@ export default function AppShell() {
                 {(user?.full_name || user?.email || '?')[0].toUpperCase()}
               </div>
             </div>
-          </header>
-        </div>
+        </header>
         <main id="main-content" tabIndex={-1} className="w-full flex-1 px-6 py-8">
           <Outlet />
         </main>
