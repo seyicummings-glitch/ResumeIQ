@@ -1,11 +1,12 @@
 """
 One-off, idempotent schema migration for changes that `Base.metadata.create_all`
 can't apply on its own (it only creates missing tables/columns on tables that
-don't exist yet — it never ALTERs an existing table). This project has no
-Alembic, so new columns on pre-existing tables (analysis_results, resumes,
-users) are added here instead.
+don't exist yet — it never ALTERs or drops columns on an existing table).
+This project has no Alembic, so column additions/removals on pre-existing
+tables (analysis_results, resumes, users) are done here instead.
 
-Safe to re-run: every statement uses `ADD COLUMN IF NOT EXISTS`.
+Safe to re-run: every statement uses `ADD COLUMN IF NOT EXISTS` or
+`DROP COLUMN IF EXISTS`.
 """
 import os
 from sqlalchemy import create_engine, text
@@ -23,7 +24,7 @@ STATEMENTS = [
     "ALTER TABLE resumes ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
     # Milestone 7 — admin: user status
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'active'",
-    # Rich profile + bring-your-own Claude API key
+    # Rich profile
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS location VARCHAR",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS linkedin_url VARCHAR",
@@ -33,7 +34,6 @@ STATEMENTS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS industry VARCHAR",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS experience_level VARCHAR",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS career_goals TEXT",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS claude_api_key VARCHAR",
     # Resume dashboard — store the original uploaded file so it can be re-downloaded
     "ALTER TABLE resumes ADD COLUMN IF NOT EXISTS file_data BYTEA",
     "ALTER TABLE resumes ADD COLUMN IF NOT EXISTS file_content_type VARCHAR",
@@ -46,6 +46,12 @@ STATEMENTS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR DEFAULT 'free'",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ",
     "ALTER TABLE resumes ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'upload'",
+    # Cleanup — drop the unused bring-your-own Claude/Anthropic API key column.
+    # Claude/Anthropic support was fully removed from this app; Gemini (with
+    # a single server-wide key) is the sole AI provider, so a per-user
+    # Claude key was never read or written by any route and was just sitting
+    # on the table unused.
+    "ALTER TABLE users DROP COLUMN IF EXISTS claude_api_key",
 ]
 
 

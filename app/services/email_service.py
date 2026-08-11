@@ -1,8 +1,8 @@
 """
 Transactional email sending via plain SMTP (stdlib only, no extra dependency).
 
-Gated by env vars the same way ANTHROPIC_API_KEY gates AI features elsewhere
-in this app: if SMTP isn't configured, is_email_configured() is False and
+Gated by env vars the same way GEMINI_API_KEY gates AI features elsewhere in
+this app: if SMTP isn't configured, is_email_configured() is False and
 callers fall back to their own dev-mode behavior instead of failing.
 
     SMTP_HOST       - e.g. smtp.gmail.com, smtp.sendgrid.net
