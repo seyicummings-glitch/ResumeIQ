@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Upload, Clock, User, Shield, LogOut, ChevronLeft, ChevronRight, Brain, MessageSquare, Map, Sparkles, GitCompare, BarChart3 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../auth/AuthContext'
@@ -23,8 +23,15 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const { user, logout, isAdminView } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
-  const visibleNav = NAV_ITEMS.filter((item) => !item.adminOnly || isAdminView)
+  // Inside the admin section, AdminNav's own grouped sidebar is the complete
+  // navigation for that area — showing the regular customer-facing feature
+  // links here too would mean admin and user nav are visually mixed
+  // together, which is exactly what "no visual access to admin functionality
+  // while in User View Mode" (and its inverse, here) is about avoiding.
+  const inAdminSection = location.pathname.startsWith('/admin')
+  const visibleNav = inAdminSection ? [] : NAV_ITEMS.filter((item) => !item.adminOnly || isAdminView)
 
   function handleLogout() {
     logout()
