@@ -190,10 +190,15 @@ function TopicRow({ topic, onToggle, isToggling, onAskCoach }) {
           >
             <div>
               <p className={clsx('font-medium text-text-h', topic.done && 'text-text/50 line-through')}>{topic.title}</p>
-              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-text">
+              <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-text">
                 <Badge tone={PRIORITY_TONE[topic.priority] || 'neutral'} className="!text-[10px]">
                   {topic.priority}
                 </Badge>
+                {topic.category && (
+                  <Badge tone="accent" className="!text-[10px]">
+                    {topic.category}
+                  </Badge>
+                )}
                 {topic.estimated_hours}h estimated
               </p>
             </div>
@@ -397,6 +402,13 @@ export default function LearningRoadmapPage() {
               'A phased plan to close the skill gaps from your latest analysis.'
             )}
           </p>
+          {roadmap.detected_profession && (
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-text">
+              <span className="text-text/70">Detected profession:</span>
+              <Badge tone="accent">{roadmap.detected_profession}</Badge>
+              {roadmap.detected_industry && <Badge tone="neutral">{roadmap.detected_industry}</Badge>}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="secondary" size="sm" onClick={() => openCoach(null)}>
