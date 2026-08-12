@@ -21,6 +21,7 @@ def _mock_groq_response(payload: dict) -> Mock:
 def _topic(i):
     return {
         "title": f"Topic {i}",
+        "category": "Some Category",
         "why_it_matters": "It matters.",
         "current_gap": "Not yet demonstrated.",
         "learning_objectives": ["Objective A", "Objective B"],
@@ -64,7 +65,11 @@ def _stage(name):
     }
 
 
-VALID_PAYLOAD = {"stages": [_stage(name) for name in STAGE_NAMES]}
+VALID_PAYLOAD = {
+    "detected_profession": "Backend Engineer",
+    "detected_industry": "Tech",
+    "stages": [_stage(name) for name in STAGE_NAMES],
+}
 
 
 def test_no_api_key_returns_none(monkeypatch):
@@ -94,13 +99,31 @@ def test_successful_call_returns_four_stages(mock_client_cls, monkeypatch):
     assert result is not None
     assert [s["stage"] for s in result["stages"]] == STAGE_NAMES
     assert len(result["stages"][0]["topics"]) == TOPICS_PER_STAGE
+    assert result["detected_profession"] == "Backend Engineer"
+    assert result["detected_industry"] == "Tech"
+    assert result["stages"][0]["topics"][0]["category"] == "Some Category"
+
+
+@patch("app.services.learning_roadmap_ai.genai.Client")
+def test_missing_detected_profession_returns_none(mock_client_cls, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    bad_payload = {"detected_industry": "Tech", "stages": [_stage(name) for name in STAGE_NAMES]}
+    mock_client = Mock()
+    mock_response = Mock()
+    mock_response.text = json.dumps(bad_payload)
+    mock_client.models.generate_content.return_value = mock_response
+    mock_client_cls.return_value = mock_client
+
+    result = generate_learning_roadmap("Business Administration", "", "mid", "resume", [], [], "")
+    assert result is None
 
 
 @patch("app.services.learning_roadmap_ai.genai.Client")
 def test_wrong_stage_count_returns_none(mock_client_cls, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
-    bad_payload = {"stages": [_stage(name) for name in STAGE_NAMES[:3]]}
+    bad_payload = {"detected_profession": "Backend Engineer", "detected_industry": "Tech", "stages": [_stage(name) for name in STAGE_NAMES[:3]]}
     mock_client = Mock()
     mock_response = Mock()
     mock_response.text = json.dumps(bad_payload)
@@ -116,7 +139,7 @@ def test_wrong_stage_order_returns_none(mock_client_cls, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
     shuffled = ["Intermediate", "Foundation", "Job Ready", "Advanced"]
-    bad_payload = {"stages": [_stage(name) for name in shuffled]}
+    bad_payload = {"detected_profession": "Backend Engineer", "detected_industry": "Tech", "stages": [_stage(name) for name in shuffled]}
     mock_client = Mock()
     mock_response = Mock()
     mock_response.text = json.dumps(bad_payload)
@@ -134,7 +157,10 @@ def test_topic_missing_quiz_returns_none(mock_client_cls, monkeypatch):
     incomplete_topic = _topic(0)
     del incomplete_topic["quiz"]
     bad_stage = {**_stage("Foundation"), "topics": [incomplete_topic] + [_topic(i) for i in range(1, TOPICS_PER_STAGE)]}
-    bad_payload = {"stages": [bad_stage] + [_stage(name) for name in STAGE_NAMES[1:]]}
+    bad_payload = {
+        "detected_profession": "Backend Engineer", "detected_industry": "Tech",
+        "stages": [bad_stage] + [_stage(name) for name in STAGE_NAMES[1:]],
+    }
 
     mock_client = Mock()
     mock_response = Mock()

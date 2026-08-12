@@ -46,6 +46,9 @@ STATEMENTS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR DEFAULT 'free'",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ",
     "ALTER TABLE resumes ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'upload'",
+    # Profession-aware learning roadmaps — persist what was actually detected
+    "ALTER TABLE learning_roadmaps ADD COLUMN IF NOT EXISTS detected_profession VARCHAR",
+    "ALTER TABLE learning_roadmaps ADD COLUMN IF NOT EXISTS detected_industry VARCHAR",
     # Cleanup — drop the unused bring-your-own Claude/Anthropic API key column.
     # Claude/Anthropic support was fully removed from this app; Gemini (with
     # a single server-wide key) is the sole AI provider, so a per-user

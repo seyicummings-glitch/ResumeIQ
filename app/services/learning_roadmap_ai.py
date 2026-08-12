@@ -73,6 +73,7 @@ _TOPIC_SCHEMA = {
     "type": "object",
     "properties": {
         "title": {"type": "string"},
+        "category": {"type": "string"},
         "why_it_matters": {"type": "string"},
         "current_gap": {"type": "string"},
         "learning_objectives": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 4},
@@ -102,7 +103,7 @@ _TOPIC_SCHEMA = {
         "priority": {"type": "string", "enum": ["critical", "high", "medium"]},
     },
     "required": [
-        "title", "why_it_matters", "current_gap", "learning_objectives", "milestones", "resources",
+        "title", "category", "why_it_matters", "current_gap", "learning_objectives", "milestones", "resources",
         "projects", "exercises", "quiz", "estimated_hours", "priority",
     ],
     "additionalProperties": False,
@@ -111,6 +112,8 @@ _TOPIC_SCHEMA = {
 ROADMAP_SCHEMA = {
     "type": "object",
     "properties": {
+        "detected_profession": {"type": "string"},
+        "detected_industry": {"type": "string"},
         "stages": {
             "type": "array",
             "minItems": 4,
@@ -134,7 +137,7 @@ ROADMAP_SCHEMA = {
             },
         },
     },
-    "required": ["stages"],
+    "required": ["detected_profession", "detected_industry", "stages"],
     "additionalProperties": False,
 }
 
@@ -173,26 +176,46 @@ def _build_prompt(
 
     context = "\n\n".join(context_blocks)
 
-    return f"""Design a complete, realistic learning roadmap to take this candidate from their current level to fully
-job-ready for the TARGET ROLE below. The target role and industry are the primary driver of what the roadmap must
-cover — build the roadmap around what a working professional in that role is actually expected to know, not just
-what's already on the resume. If the role requires something the resume doesn't mention, include it anyway.
+    return f"""STEP 1 — Before writing anything else, determine this candidate's actual profession, industry, and
+career field. Use the TARGET ROLE if one is given; otherwise infer it from the resume's job titles, listed skills,
+and experience descriptions. Do NOT default to software engineering — that is only correct if the evidence actually
+points there. A Business Administration graduate needs a roadmap about business analytics, strategic planning, and
+financial management; a marketer needs SEO, campaigns, and analytics; an accountant needs financial reporting,
+taxation, and auditing — none of those should ever come back as a programming/web-development roadmap. Record your
+conclusion in the "detected_profession" (a specific role/title, e.g. "Business Analyst", "Marketing Coordinator",
+"Staff Accountant", "Backend Engineer" — never something vague like "Professional") and "detected_industry" fields.
+
+STEP 2 — Design a complete, realistic learning roadmap to take this candidate from their current level to fully
+job-ready for the profession you just detected. Build the roadmap around what a working professional in THAT
+profession is actually expected to know, not just what's already on the resume — if the profession requires
+something the resume doesn't mention, include it anyway. Every stage and topic must be grounded in the DETECTED
+profession, never generic tech content unless the detected profession genuinely is a technical/engineering one.
 
 {context}
 
 Structure the roadmap into exactly 4 stages, in this exact order: Foundation, Intermediate, Advanced, Job Ready.
-- Foundation: core fundamentals and prerequisites for the role — what someone needs before anything else.
+- Foundation: core fundamentals and prerequisites for the detected profession — what someone needs before anything
+  else, expressed in that profession's own terms (e.g. financial literacy and business communication for a business
+  role, not version control or data structures unless the profession is genuinely technical).
 - Intermediate: the core, everyday skills of the role.
 - Advanced: specialized, differentiating skills — including the identified skill gaps and anything that separates
-  a strong candidate from an average one for this specific role.
-- Job Ready: interview readiness, portfolio-building, system design/architecture thinking, and polish — the final
-  stretch before applying.
+  a strong candidate from an average one for this specific profession.
+- Job Ready: interview readiness, portfolio/case-study building, a capstone project or case study appropriate to
+  the detected profession (a business case study for a business role, a campaign case study for marketing, a
+  system-design exercise only for an engineering role, etc.), and polish — the final stretch before applying.
 
 For each stage, write a short description, a realistic estimated_duration (e.g. "2-3 weeks"), and a milestone: a
-concrete, checkable capability statement ("You can now build and deploy a full REST API with authentication").
+concrete, checkable capability statement specific to the detected profession (e.g. "You can now build and deploy a
+full REST API with authentication" for an engineering role, or "You can build a full financial model and defend its
+assumptions" for a finance role — never a generic statement, and never a technical one unless the profession is
+technical).
 
 For each stage, generate exactly {TOPICS_PER_STAGE} topics. Each topic needs:
-- title: a specific topic, not a vague category (e.g. "REST API design and versioning", not "Backend basics").
+- title: a specific topic, not a vague category (e.g. "REST API design and versioning" or "Financial statement
+  analysis", not "Backend basics" or "Finance stuff").
+- category: a short label grouping this topic for the UI (e.g. "Financial Literacy", "Analytics", "Communication",
+  "Tools & Software", "Technical Depth" — pick whatever labels genuinely fit the detected profession, don't force
+  software-engineering-flavored categories onto a non-technical roadmap).
 - why_it_matters: 1-2 sentences on why this specific topic matters for THIS role, grounded in real industry practice.
 - current_gap: 1-2 sentences naming the candidate's SPECIFIC current gap for this exact topic — grounded in what
   their resume, skill assessment, or interview feedback actually shows (or doesn't show), not a generic "you don't
@@ -216,18 +239,21 @@ For each stage, generate exactly {TOPICS_PER_STAGE} topics. Each topic needs:
 - priority: "critical" if this closes an identified skill gap or is core to the role, "high" if it's important but
   not urgent, "medium" if it rounds out the profile.
 
-Ground everything in what real companies actually expect for this role — this should read like a roadmap a senior
-engineer or hiring manager in this field would actually endorse, not generic advice.
+Ground everything in what real companies actually expect for the DETECTED profession — this should read like a
+roadmap a senior practitioner or hiring manager in that specific field would actually endorse, not generic advice
+and not a software engineering roadmap wearing a different job title.
 """
 
 
 _TOPIC_REQUIRED_KEYS = (
-    "title", "why_it_matters", "current_gap", "learning_objectives", "milestones",
+    "title", "category", "why_it_matters", "current_gap", "learning_objectives", "milestones",
     "resources", "projects", "exercises", "quiz", "estimated_hours", "priority",
 )
 
 
 def _validate_roadmap(result: dict) -> bool:
+    if not result.get("detected_profession") or not isinstance(result.get("detected_industry"), str):
+        return False
     stages = result.get("stages", [])
     if len(stages) != 4:
         return False
@@ -268,14 +294,16 @@ def _roadmap_via_groq(
         target_role, industry, experience_level, resume_text, resume_skills,
         missing_skills, jd_content, skill_assessment_summary, interview_summary,
     ) + groq_json_instructions(
-        '"stages" — an array of exactly 4 objects, in this exact order and with these exact "stage" values: '
-        '"Foundation", "Intermediate", "Advanced", "Job Ready". Each stage object needs "stage" (string), '
-        '"description" (string), "estimated_duration" (string), "milestone" (string), and "topics" (an array of '
-        f'exactly {TOPICS_PER_STAGE} objects, each with "title" (string), "why_it_matters" (string), '
-        '"current_gap" (string), "learning_objectives" (array of strings), "milestones" (object with "beginner", '
-        '"intermediate", "advanced" string fields), "resources" (array of objects with "name", "type" — one of '
-        'Course/Free/Book/Docs/Cert/Video/Article/Tutorial — and "provider" strings), "projects" (array of '
-        'strings), "exercises" (array of strings), "quiz" (array of 2-3 objects, each with "question" (string), '
+        '"detected_profession" (string, a specific role/title — never software engineering unless the evidence '
+        'actually points there), "detected_industry" (string), and "stages" — an array of exactly 4 objects, in '
+        'this exact order and with these exact "stage" values: "Foundation", "Intermediate", "Advanced", '
+        '"Job Ready". Each stage object needs "stage" (string), "description" (string), "estimated_duration" '
+        '(string), "milestone" (string), and "topics" (an array of '
+        f'exactly {TOPICS_PER_STAGE} objects, each with "title" (string), "category" (string), "why_it_matters" '
+        '(string), "current_gap" (string), "learning_objectives" (array of strings), "milestones" (object with '
+        '"beginner", "intermediate", "advanced" string fields), "resources" (array of objects with "name", "type" '
+        '— one of Course/Free/Book/Docs/Cert/Video/Article/Tutorial — and "provider" strings), "projects" (array '
+        'of strings), "exercises" (array of strings), "quiz" (array of 2-3 objects, each with "question" (string), '
         '"options" (array of exactly 4 strings), "correct_index" (0-indexed integer), and "explanation" (string)), '
         '"estimated_hours" (integer), and "priority" ("critical", "high", or "medium"))'
     )

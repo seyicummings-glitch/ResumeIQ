@@ -95,7 +95,10 @@ def _generate_and_save_roadmap(db: Session, current_user: User) -> LearningRoadm
 
     source = "ai"
     if stages_result is None:
-        stages_result = build_roadmap(missing_skills, resume_skills)
+        stages_result = build_roadmap(
+            missing_skills, resume_skills,
+            target_role=current_user.target_role, industry=current_user.industry, resume_text=resume_text,
+        )
         source = "fallback"
 
     stages = _assign_topic_keys(stages_result["stages"])
@@ -105,6 +108,8 @@ def _generate_and_save_roadmap(db: Session, current_user: User) -> LearningRoadm
         source=source,
         target_role=current_user.target_role,
         industry=current_user.industry,
+        detected_profession=stages_result.get("detected_profession"),
+        detected_industry=stages_result.get("detected_industry"),
         stages_json=stages,
     )
     db.add(roadmap)
@@ -142,6 +147,8 @@ def _serialize_roadmap(db: Session, roadmap: LearningRoadmap, user_id: int) -> d
         "source": roadmap.source,
         "target_role": roadmap.target_role,
         "industry": roadmap.industry,
+        "detected_profession": roadmap.detected_profession,
+        "detected_industry": roadmap.detected_industry,
         "stages": stages,
         "created_at": roadmap.created_at,
         "stats": {

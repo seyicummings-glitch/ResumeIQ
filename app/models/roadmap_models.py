@@ -14,6 +14,8 @@ class LearningRoadmap(Base):
     source = Column(String, nullable=False)  # "ai" | "fallback"
     target_role = Column(String, nullable=True)
     industry = Column(String, nullable=True)
+    detected_profession = Column(String, nullable=True)
+    detected_industry = Column(String, nullable=True)
     stages_json = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
