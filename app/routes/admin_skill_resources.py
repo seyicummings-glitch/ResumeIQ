@@ -18,7 +18,12 @@ def _serialize(resource: SkillResource) -> dict:
         "skillKey": resource.skill_key,
         "skillLabel": resource.skill_label,
         "youtubeUrl": resource.youtube_url,
+        "youtubeTitle": resource.youtube_title,
+        "youtubeChannel": resource.youtube_channel,
+        "youtubeDuration": resource.youtube_duration,
         "courseUrl": resource.course_url,
+        "courseTitle": resource.course_title,
+        "courseProvider": resource.course_provider,
         "docsUrl": resource.docs_url,
         "createdAt": resource.created_at,
         "updatedAt": resource.updated_at,
@@ -46,7 +51,12 @@ def list_skill_resources(
 class SkillResourceInput(BaseModel):
     skillLabel: str
     youtubeUrl: str | None = None
+    youtubeTitle: str | None = None
+    youtubeChannel: str | None = None
+    youtubeDuration: str | None = None
     courseUrl: str | None = None
+    courseTitle: str | None = None
+    courseProvider: str | None = None
     docsUrl: str | None = None
 
 
@@ -64,7 +74,12 @@ def create_skill_resource(data: SkillResourceInput, db: Session = Depends(get_db
         skill_key=skill_key,
         skill_label=data.skillLabel,
         youtube_url=data.youtubeUrl or None,
+        youtube_title=data.youtubeTitle or None,
+        youtube_channel=data.youtubeChannel or None,
+        youtube_duration=data.youtubeDuration or None,
         course_url=data.courseUrl or None,
+        course_title=data.courseTitle or None,
+        course_provider=data.courseProvider or None,
         docs_url=data.docsUrl or None,
     )
     db.add(resource)
@@ -92,7 +107,12 @@ def update_skill_resource(
     resource.skill_key = new_key
     resource.skill_label = data.skillLabel
     resource.youtube_url = data.youtubeUrl or None
+    resource.youtube_title = data.youtubeTitle or None
+    resource.youtube_channel = data.youtubeChannel or None
+    resource.youtube_duration = data.youtubeDuration or None
     resource.course_url = data.courseUrl or None
+    resource.course_title = data.courseTitle or None
+    resource.course_provider = data.courseProvider or None
     resource.docs_url = data.docsUrl or None
 
     db.commit()

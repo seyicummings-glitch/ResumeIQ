@@ -47,6 +47,28 @@ def test_update_skill_resource_changes_fields(db_session):
     assert updated["docsUrl"] == "https://docs.docker.com"
 
 
+def test_create_skill_resource_stores_rich_video_and_course_metadata(db_session):
+    admin = _admin(db_session)
+    result = routes.create_skill_resource(
+        routes.SkillResourceInput(
+            skillLabel="Kubernetes",
+            youtubeUrl="https://www.youtube.com/watch?v=X48VuDVv0do",
+            youtubeTitle="Kubernetes Tutorial for Beginners",
+            youtubeChannel="TechWorld with Nana",
+            youtubeDuration="4 Hours",
+            courseUrl="https://www.udemy.com/course/kubernetes-course/",
+            courseTitle="Kubernetes for the Absolute Beginners",
+            courseProvider="Udemy",
+        ),
+        db_session, admin,
+    )
+    assert result["youtubeTitle"] == "Kubernetes Tutorial for Beginners"
+    assert result["youtubeChannel"] == "TechWorld with Nana"
+    assert result["youtubeDuration"] == "4 Hours"
+    assert result["courseTitle"] == "Kubernetes for the Absolute Beginners"
+    assert result["courseProvider"] == "Udemy"
+
+
 def test_update_skill_resource_rejects_key_collision(db_session):
     admin = _admin(db_session)
     routes.create_skill_resource(routes.SkillResourceInput(skillLabel="Docker"), db_session, admin)

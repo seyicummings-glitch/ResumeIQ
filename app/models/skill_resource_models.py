@@ -16,7 +16,12 @@ class SkillResource(Base):
     skill_key = Column(String, unique=True, nullable=False, index=True)
     skill_label = Column(String, nullable=False)
     youtube_url = Column(String, nullable=True)
+    youtube_title = Column(String, nullable=True)
+    youtube_channel = Column(String, nullable=True)
+    youtube_duration = Column(String, nullable=True)  # free-text, e.g. "3 Hours" — display only
     course_url = Column(String, nullable=True)
+    course_title = Column(String, nullable=True)
+    course_provider = Column(String, nullable=True)
     docs_url = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

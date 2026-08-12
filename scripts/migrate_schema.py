@@ -49,6 +49,12 @@ STATEMENTS = [
     # Profession-aware learning roadmaps — persist what was actually detected
     "ALTER TABLE learning_roadmaps ADD COLUMN IF NOT EXISTS detected_profession VARCHAR",
     "ALTER TABLE learning_roadmaps ADD COLUMN IF NOT EXISTS detected_industry VARCHAR",
+    # Rich video/course cards for skill resources
+    "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS youtube_title VARCHAR",
+    "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS youtube_channel VARCHAR",
+    "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS youtube_duration VARCHAR",
+    "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS course_title VARCHAR",
+    "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS course_provider VARCHAR",
     # Cleanup — drop the unused bring-your-own Claude/Anthropic API key column.
     # Claude/Anthropic support was fully removed from this app; Gemini (with
     # a single server-wide key) is the sole AI provider, so a per-user
