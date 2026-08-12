@@ -137,30 +137,99 @@ function QuizQuestion({ question, index }) {
   )
 }
 
+function VideoResourceCard({ links }) {
+  if (!links.youtubeUrl) return null
+  return (
+    <a
+      href={links.youtubeUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex w-full flex-col overflow-hidden rounded-lg border border-border bg-surface transition-colors hover:border-accent sm:w-56"
+    >
+      {links.youtubeThumbnailUrl ? (
+        <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-black/10">
+          <img
+            src={links.youtubeThumbnailUrl}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            onError={(event) => {
+              event.currentTarget.parentElement.style.display = 'none'
+            }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/25 opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-danger">
+              <Play size={16} className="ml-0.5" fill="currentColor" aria-hidden="true" />
+            </span>
+          </div>
+          {links.youtubeDuration && (
+            <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-medium text-white">
+              {links.youtubeDuration}
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="flex aspect-video w-full shrink-0 items-center justify-center bg-danger-bg text-danger">
+          <Play size={22} aria-hidden="true" />
+        </div>
+      )}
+      <div className="flex flex-1 flex-col gap-1 p-2.5">
+        <p className="line-clamp-2 text-xs font-medium text-text-h">{links.youtubeTitle || 'Recommended tutorial'}</p>
+        {links.youtubeChannel && <p className="text-[11px] text-text/60">{links.youtubeChannel}</p>}
+        <span className="mt-auto inline-flex items-center gap-1 pt-1 text-[11px] font-semibold text-accent">
+          Watch on YouTube <ExternalLink size={11} aria-hidden="true" />
+        </span>
+      </div>
+    </a>
+  )
+}
+
+function CourseResourceCard({ links }) {
+  if (!links.courseUrl) return null
+  return (
+    <a
+      href={links.courseUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex w-full flex-col gap-2 rounded-lg border border-border bg-surface p-2.5 transition-colors hover:border-accent sm:w-56"
+    >
+      <div className="flex items-start gap-2">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
+          <BookOpen size={16} aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <p className="line-clamp-2 text-xs font-medium text-text-h">{links.courseTitle || 'Recommended course'}</p>
+          {links.courseProvider && <p className="text-[11px] text-text/60">{links.courseProvider}</p>}
+        </div>
+      </div>
+      <span className="mt-auto inline-flex items-center gap-1 text-[11px] font-semibold text-accent">
+        Start Course <ExternalLink size={11} aria-hidden="true" />
+      </span>
+    </a>
+  )
+}
+
 function RecommendedResourceLinks({ links }) {
   if (!links) return null
-  const buttons = [
-    { url: links.youtubeUrl, label: 'Watch YouTube Tutorial', icon: Play },
-    { url: links.courseUrl, label: 'Take Online Course', icon: BookOpen },
-    { url: links.docsUrl, label: 'Read Documentation', icon: FileText },
-  ].filter((entry) => entry.url)
-
-  if (buttons.length === 0) return null
+  const hasVideo = Boolean(links.youtubeUrl)
+  const hasCourse = Boolean(links.courseUrl)
+  if (!hasVideo && !hasCourse && !links.docsUrl) return null
 
   return (
-    <div className="flex flex-wrap gap-1.5" onClick={(event) => event.stopPropagation()}>
-      {buttons.map(({ url, label, icon: Icon }) => (
+    <div className="flex flex-wrap items-stretch gap-2" onClick={(event) => event.stopPropagation()}>
+      <VideoResourceCard links={links} />
+      <CourseResourceCard links={links} />
+      {links.docsUrl && (
         <a
-          key={label}
-          href={url}
+          href={links.docsUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-h transition-colors hover:border-accent hover:text-accent"
+          className="inline-flex h-fit items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-h transition-colors hover:border-accent hover:text-accent"
         >
-          <Icon size={12} aria-hidden="true" />
-          {label}
+          <FileText size={12} aria-hidden="true" />
+          Documentation
         </a>
-      ))}
+      )}
     </div>
   )
 }

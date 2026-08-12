@@ -29,6 +29,24 @@ function LinkCell({ url }) {
   )
 }
 
+function ResourceCell({ url, title, subtitle }) {
+  if (!url) return <span className="text-text/40">—</span>
+  return (
+    <div className="flex flex-col">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="max-w-[14rem] truncate text-accent hover:underline"
+        title={title || url}
+      >
+        {title || 'Link'}
+      </a>
+      {subtitle ? <span className="text-xs text-text/60">{subtitle}</span> : null}
+    </div>
+  )
+}
+
 export default function AdminSkillResourcesPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
@@ -50,7 +68,17 @@ export default function AdminSkillResourcesPage() {
 
   function openCreate() {
     setEditingResource({})
-    reset({ skillLabel: '', youtubeUrl: '', courseUrl: '', docsUrl: '' })
+    reset({
+      skillLabel: '',
+      youtubeUrl: '',
+      youtubeTitle: '',
+      youtubeChannel: '',
+      youtubeDuration: '',
+      courseUrl: '',
+      courseTitle: '',
+      courseProvider: '',
+      docsUrl: '',
+    })
   }
 
   function openEdit(resource) {
@@ -58,7 +86,12 @@ export default function AdminSkillResourcesPage() {
     reset({
       skillLabel: resource.skillLabel,
       youtubeUrl: resource.youtubeUrl || '',
+      youtubeTitle: resource.youtubeTitle || '',
+      youtubeChannel: resource.youtubeChannel || '',
+      youtubeDuration: resource.youtubeDuration || '',
       courseUrl: resource.courseUrl || '',
+      courseTitle: resource.courseTitle || '',
+      courseProvider: resource.courseProvider || '',
       docsUrl: resource.docsUrl || '',
     })
   }
@@ -67,7 +100,12 @@ export default function AdminSkillResourcesPage() {
     const fields = {
       skillLabel: values.skillLabel,
       youtubeUrl: values.youtubeUrl || null,
+      youtubeTitle: values.youtubeTitle || null,
+      youtubeChannel: values.youtubeChannel || null,
+      youtubeDuration: values.youtubeDuration || null,
       courseUrl: values.courseUrl || null,
+      courseTitle: values.courseTitle || null,
+      courseProvider: values.courseProvider || null,
       docsUrl: values.docsUrl || null,
     }
     try {
@@ -150,10 +188,14 @@ export default function AdminSkillResourcesPage() {
                 <tr key={resource.id}>
                   <Td className="font-medium">{resource.skillLabel}</Td>
                   <Td>
-                    <LinkCell url={resource.youtubeUrl} />
+                    <ResourceCell
+                      url={resource.youtubeUrl}
+                      title={resource.youtubeTitle}
+                      subtitle={[resource.youtubeChannel, resource.youtubeDuration].filter(Boolean).join(' · ')}
+                    />
                   </Td>
                   <Td>
-                    <LinkCell url={resource.courseUrl} />
+                    <ResourceCell url={resource.courseUrl} title={resource.courseTitle} subtitle={resource.courseProvider} />
                   </Td>
                   <Td>
                     <LinkCell url={resource.docsUrl} />
@@ -183,8 +225,24 @@ export default function AdminSkillResourcesPage() {
       >
         <form onSubmit={handleSubmit(onSubmitEdit)} className="flex flex-col gap-4">
           <Input label="Skill name" required {...register('skillLabel', { required: true })} />
-          <Input label="YouTube tutorial URL" type="url" placeholder="https://youtube.com/…" {...register('youtubeUrl')} />
-          <Input label="Online course URL" type="url" placeholder="https://…" {...register('courseUrl')} />
+
+          <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-text/60">YouTube video card</p>
+            <Input label="YouTube tutorial URL" type="url" placeholder="https://youtube.com/…" {...register('youtubeUrl')} />
+            <Input label="Video title" placeholder="e.g. React Course - Beginner's Tutorial" {...register('youtubeTitle')} />
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Channel name" placeholder="e.g. freeCodeCamp.org" {...register('youtubeChannel')} />
+              <Input label="Duration (optional)" placeholder="e.g. 3 Hours" {...register('youtubeDuration')} />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-text/60">Course card</p>
+            <Input label="Online course URL" type="url" placeholder="https://…" {...register('courseUrl')} />
+            <Input label="Course title" placeholder="e.g. React - The Complete Guide" {...register('courseTitle')} />
+            <Input label="Course provider" placeholder="e.g. Udemy, Coursera" {...register('courseProvider')} />
+          </div>
+
           <Input label="Documentation URL (optional)" type="url" placeholder="https://…" {...register('docsUrl')} />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setEditingResource(null)}>
