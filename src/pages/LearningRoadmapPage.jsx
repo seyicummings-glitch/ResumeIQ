@@ -137,8 +137,12 @@ function QuizQuestion({ question, index }) {
   )
 }
 
-function VideoResourceCard({ links }) {
+function VideoResourceCard({ links, skillTitle }) {
   if (!links.youtubeUrl) return null
+  const description = links.exactMatch
+    ? `A focused tutorial on ${skillTitle}${links.youtubeChannel ? ` from ${links.youtubeChannel}` : ''}${links.youtubeDuration ? ` (${links.youtubeDuration})` : ''}.`
+    : `No exact video for "${skillTitle}" yet — this is the closest match for your field${links.youtubeChannel ? ` from ${links.youtubeChannel}` : ''}.`
+
   return (
     <a
       href={links.youtubeUrl}
@@ -167,6 +171,11 @@ function VideoResourceCard({ links }) {
               {links.youtubeDuration}
             </span>
           )}
+          {!links.exactMatch && (
+            <span className="absolute left-1 top-1 rounded bg-accent/90 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">
+              Closest match
+            </span>
+          )}
         </div>
       ) : (
         <div className="flex aspect-video w-full shrink-0 items-center justify-center bg-danger-bg text-danger">
@@ -176,8 +185,9 @@ function VideoResourceCard({ links }) {
       <div className="flex flex-1 flex-col gap-1 p-2.5">
         <p className="line-clamp-2 text-xs font-medium text-text-h">{links.youtubeTitle || 'Recommended tutorial'}</p>
         {links.youtubeChannel && <p className="text-[11px] text-text/60">{links.youtubeChannel}</p>}
+        <p className="line-clamp-2 text-[11px] text-text/70">{description}</p>
         <span className="mt-auto inline-flex items-center gap-1 pt-1 text-[11px] font-semibold text-accent">
-          Watch on YouTube <ExternalLink size={11} aria-hidden="true" />
+          Start Learning <ExternalLink size={11} aria-hidden="true" />
         </span>
       </div>
     </a>
@@ -209,7 +219,7 @@ function CourseResourceCard({ links }) {
   )
 }
 
-function RecommendedResourceLinks({ links }) {
+function RecommendedResourceLinks({ links, skillTitle }) {
   if (!links) return null
   const hasVideo = Boolean(links.youtubeUrl)
   const hasCourse = Boolean(links.courseUrl)
@@ -217,7 +227,7 @@ function RecommendedResourceLinks({ links }) {
 
   return (
     <div className="flex flex-wrap items-stretch gap-2" onClick={(event) => event.stopPropagation()}>
-      <VideoResourceCard links={links} />
+      <VideoResourceCard links={links} skillTitle={skillTitle} />
       <CourseResourceCard links={links} />
       {links.docsUrl && (
         <a
@@ -281,7 +291,7 @@ function TopicRow({ topic, onToggle, isToggling, onAskCoach }) {
           {topic.current_gap && <p className="mt-1.5 text-xs text-text">{topic.current_gap}</p>}
 
           <div className="mt-2">
-            <RecommendedResourceLinks links={topic.resource_links} />
+            <RecommendedResourceLinks links={topic.resource_links} skillTitle={topic.title} />
           </div>
         </div>
       </div>
