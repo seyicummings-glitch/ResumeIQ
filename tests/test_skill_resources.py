@@ -37,6 +37,7 @@ def test_get_resource_links_admin_curated_takes_priority_and_gets_thumbnail():
     )]
     links = get_resource_links("Docker", resources)
     assert links["curated"] is True
+    assert links["exactMatch"] is True
     assert links["youtubeUrl"] == "https://www.youtube.com/watch?v=CUSTOM12345"
     assert links["youtubeTitle"] == "Admin's Chosen Docker Video"
     assert links["youtubeVideoId"] == "CUSTOM12345"
@@ -58,6 +59,7 @@ def test_get_resource_links_admin_curated_without_metadata_still_gets_thumbnail(
 def test_get_resource_links_falls_back_to_builtin_curated_video_when_no_admin_match():
     links = get_resource_links("React", [])
     assert links["curated"] is True
+    assert links["exactMatch"] is True
     assert links["youtubeChannel"] == "freeCodeCamp.org"
     assert links["youtubeTitle"]
     assert links["youtubeVideoId"] == "bMknfKXIFA8"
@@ -71,16 +73,42 @@ def test_get_resource_links_builtin_curated_matches_topic_containing_skill():
     assert links["youtubeChannel"] == "freeCodeCamp.org"
 
 
-def test_get_resource_links_falls_back_to_generated_search_links_when_nothing_matches():
-    links = get_resource_links("Some Totally Uncurated Skill", [])
-    assert links["curated"] is False
-    assert links["youtubeVideoId"] is None
-    assert links["youtubeThumbnailUrl"] is None
-    assert links["youtubeTitle"] is None
-    assert links["youtubeUrl"].startswith("https://www.youtube.com/results?search_query=")
-    assert "Some+Totally+Uncurated+Skill" in links["youtubeUrl"] or "Some%20Totally%20Uncurated%20Skill" in links["youtubeUrl"]
-    assert links["courseUrl"].startswith("https://www.google.com/search?q=")
-    assert links["docsUrl"].startswith("https://www.google.com/search?q=")
+def test_get_resource_links_never_returns_a_youtube_search_url_for_an_uncurated_skill():
+    # The core requirement: clicking through must always open one specific, real
+    # video -- never a YouTube search results page or the YouTube homepage --
+    # even for a skill with no dedicated curated entry.
+    links = get_resource_links("Some Totally Uncurated Skill", [], profession_category="marketing")
+    assert links["curated"] is True
+    assert links["exactMatch"] is False
+    assert links["youtubeVideoId"] is not None
+    assert links["youtubeThumbnailUrl"] is not None
+    assert links["youtubeTitle"] is not None
+    assert "search_query" not in links["youtubeUrl"]
+    assert links["youtubeUrl"] != "https://www.youtube.com" and links["youtubeUrl"] != "https://www.youtube.com/"
+    assert "youtube.com/watch" in links["youtubeUrl"]
+    assert "google.com/search" not in links["courseUrl"]
+
+
+def test_get_resource_links_profession_fallback_matches_the_given_category():
+    links = get_resource_links("Some Totally Uncurated Skill", [], profession_category="accounting")
+    assert links["exactMatch"] is False
+    assert "bookkeeping" in links["youtubeTitle"].lower() or "accounting" in links["youtubeTitle"].lower()
+
+
+def test_get_resource_links_profession_fallback_defaults_to_general_when_category_unknown():
+    links_none = get_resource_links("Some Totally Uncurated Skill", [], profession_category=None)
+    links_unknown = get_resource_links("Some Totally Uncurated Skill", [], profession_category="not_a_real_category")
+    assert links_none["youtubeUrl"] == links_unknown["youtubeUrl"]
+    assert "search_query" not in links_none["youtubeUrl"]
+
+
+def test_every_profession_category_fallback_resolves_to_a_real_curated_video():
+    from app.services.skill_resources import _PROFESSION_FALLBACK_QUERY
+
+    for category in _PROFESSION_FALLBACK_QUERY:
+        links = get_resource_links("Some Totally Uncurated Skill", [], profession_category=category)
+        assert links["youtubeVideoId"], f"no video for category {category}"
+        assert "search_query" not in links["youtubeUrl"]
 
 
 def test_fetch_all_resources_returns_table_contents(db_session):

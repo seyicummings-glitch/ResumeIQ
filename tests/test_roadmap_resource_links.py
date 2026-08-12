@@ -12,8 +12,11 @@ def _user(db_session):
     return user
 
 
-def _roadmap(db_session, user, stages):
-    roadmap = LearningRoadmap(user_id=user.id, source="fallback", stages_json=stages)
+def _roadmap(db_session, user, stages, detected_profession=None, detected_industry=None):
+    roadmap = LearningRoadmap(
+        user_id=user.id, source="fallback", stages_json=stages,
+        detected_profession=detected_profession, detected_industry=detected_industry,
+    )
     db_session.add(roadmap)
     db_session.commit()
     db_session.refresh(roadmap)
@@ -44,12 +47,18 @@ def test_serialize_roadmap_attaches_curated_resource_links(db_session):
     assert links["docsUrl"] == "https://docs.docker.com"
 
 
-def test_serialize_roadmap_falls_back_to_generated_links_when_uncurated(db_session):
+def test_serialize_roadmap_falls_back_to_profession_closest_match_when_uncurated(db_session):
+    # Never a YouTube search URL, even for a skill with no dedicated curated entry --
+    # the roadmap's own detected_profession/detected_industry drive which profession's
+    # representative curated video gets used instead.
     user = _user(db_session)
     stages = [{"stage": "Advanced", "topics": [{"topic_key": "0-0", "title": "Some Rare Skill", "estimated_hours": 10}]}]
-    roadmap = _roadmap(db_session, user, stages)
+    roadmap = _roadmap(db_session, user, stages, detected_profession="Marketing", detected_industry="")
 
     result = _serialize_roadmap(db_session, roadmap, user.id)
-    topic = result["stages"][0]["topics"][0]
-    assert topic["resource_links"]["curated"] is False
-    assert topic["resource_links"]["youtubeUrl"] is not None
+    links = result["stages"][0]["topics"][0]["resource_links"]
+    assert links["curated"] is True
+    assert links["exactMatch"] is False
+    assert links["youtubeUrl"] is not None
+    assert "search_query" not in links["youtubeUrl"]
+    assert "marketing" in links["youtubeTitle"].lower() or "digital" in links["youtubeTitle"].lower()

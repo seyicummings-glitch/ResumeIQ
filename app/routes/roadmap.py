@@ -11,7 +11,7 @@ from app.security import get_current_user
 from app.services.analysis_store import get_latest_analysis
 from app.services.resume_structurer import extract_skills_list
 from app.services.platform_settings import is_ai_enabled
-from app.services.learning_roadmap import build_roadmap
+from app.services.learning_roadmap import build_roadmap, detect_profession_category
 from app.services.learning_roadmap_ai import generate_learning_roadmap
 from app.services.skill_resources import fetch_all_resources, get_resource_links
 
@@ -125,6 +125,17 @@ def _serialize_roadmap(db: Session, roadmap: LearningRoadmap, user_id: int) -> d
     completed_keys = {row.topic_key for row in progress_rows if row.completed}
     all_skill_resources = fetch_all_resources(db)
 
+    # Re-derived from the roadmap's already-detected profession/industry rather than
+    # persisted separately — this is the same detect_profession_category() heuristic
+    # build_roadmap() uses internally, applied to fields that exist for both the AI
+    # and rule-based paths, so it works uniformly without a schema change. Used only
+    # as the last-resort "closest match for your field" resource tier below, never to
+    # pick which topics appear.
+    profession_category = detect_profession_category(
+        target_role=roadmap.detected_profession, industry=roadmap.detected_industry,
+        resume_skills=[], missing_skills=[],
+    )
+
     total_hours = 0
     done_count = 0
     total_count = 0
@@ -138,7 +149,7 @@ def _serialize_roadmap(db: Session, roadmap: LearningRoadmap, user_id: int) -> d
             total_count += 1
             if done:
                 done_count += 1
-            resource_links = get_resource_links(topic["title"], all_skill_resources)
+            resource_links = get_resource_links(topic["title"], all_skill_resources, profession_category)
             topics.append({**topic, "done": done, "resource_links": resource_links})
         stages.append({**stage, "topics": topics})
 
