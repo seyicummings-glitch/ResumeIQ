@@ -62,7 +62,7 @@ function PackageFormModal({ isOpen, onClose, editing }) {
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
         <Input label="Name" required {...register('name', { required: true })} />
         <div className="grid grid-cols-2 gap-4">
-          <Input label="Credits" type="number" min="1" required {...register('credits', { required: true })} />
+          <Input label="Tokens" type="number" min="1" required {...register('credits', { required: true })} />
           <Input label="Price (USD)" type="number" step="0.01" min="0.01" required {...register('price', { required: true })} />
         </div>
         <Input label="Display order" type="number" {...register('displayOrder')} />
@@ -102,12 +102,12 @@ function CreditPackagesSection() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-text-h">Credit packages</h2>
+        <h2 className="text-base font-semibold text-text-h">Token packages</h2>
         <Button size="sm" onClick={() => setEditing({})}>New package</Button>
       </div>
 
       {packages.length === 0 ? (
-        <EmptyState title="No credit packages yet" description="Create a package like “100 Credits” so users can buy more usage." />
+        <EmptyState title="No token packages yet" description="Create a package like “100 Tokens” so users can buy more usage." />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {packages.map((pkg) => (
@@ -117,7 +117,7 @@ function CreditPackagesSection() {
                 <Badge tone={pkg.isActive ? 'success' : 'neutral'}>{pkg.isActive ? 'Active' : 'Inactive'}</Badge>
               </div>
               <p className="text-2xl font-semibold text-text-h">{formatPrice(pkg.priceCents, pkg.currency)}</p>
-              <p className="text-sm text-text">{pkg.credits.toLocaleString()} credits</p>
+              <p className="text-sm text-text">{pkg.credits.toLocaleString()} tokens</p>
               <div className="mt-auto flex flex-wrap gap-2 pt-2">
                 <Button variant="secondary" size="sm" onClick={() => setEditing(pkg)}>Edit</Button>
                 <Button
@@ -140,7 +140,7 @@ function CreditPackagesSection() {
         onClose={() => setDeleting(null)}
         onConfirm={confirmDelete}
         title="Delete credit package"
-        message={`This removes "${deleting?.name || ''}" from the purchase options. It won't affect credits users already bought.`}
+        message={`This removes "${deleting?.name || ''}" from the purchase options. It won't affect tokens users already bought.`}
         confirmLabel="Delete"
         isLoading={deletePackage.isPending}
       />

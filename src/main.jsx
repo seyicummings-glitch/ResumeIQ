@@ -7,6 +7,7 @@ import App from './App.jsx'
 import { AuthProvider } from './auth/AuthContext'
 import { ThemeProvider } from './theme/ThemeContext'
 import { ToastProvider } from './components/ui/Toast'
+import { UpgradeModalProvider } from './components/subscription/UpgradeModalProvider'
 import { ResumeDraftProvider } from './resume/ResumeDraftContext'
 import { ResumeBuilderDraftProvider } from './resume/ResumeBuilderDraftContext'
 import { CareerCoachProvider } from './coach/CareerCoachContext'
@@ -34,13 +35,15 @@ createRoot(document.getElementById('root')).render(
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
             <ToastProvider>
-              <ResumeDraftProvider>
-                <ResumeBuilderDraftProvider>
-                  <CareerCoachProvider>
-                    <App />
-                  </CareerCoachProvider>
-                </ResumeBuilderDraftProvider>
-              </ResumeDraftProvider>
+              <UpgradeModalProvider>
+                <ResumeDraftProvider>
+                  <ResumeBuilderDraftProvider>
+                    <CareerCoachProvider>
+                      <App />
+                    </CareerCoachProvider>
+                  </ResumeBuilderDraftProvider>
+                </ResumeDraftProvider>
+              </UpgradeModalProvider>
             </ToastProvider>
           </AuthProvider>
         </QueryClientProvider>

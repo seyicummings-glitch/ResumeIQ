@@ -27,7 +27,6 @@ import ScoreBadge from '../components/ui/ScoreBadge'
 import Spinner from '../components/ui/Spinner'
 import ErrorState from '../components/ui/ErrorState'
 import EmptyState from '../components/ui/EmptyState'
-import FeatureLimitNotice from '../components/subscription/FeatureLimitNotice'
 
 function FeedbackSection({ icon: Icon, title, items }) {
   if (!items || items.length === 0) return null
@@ -173,7 +172,6 @@ export default function InterviewPracticePage() {
   const [started, setStarted] = useState(false)
   const [done, setDone] = useState(false)
   const [chatError, setChatError] = useState(null)
-  const [limitDetail, setLimitDetail] = useState(null)
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true)
   const [sessionResult, setSessionResult] = useState(null)
 
@@ -203,7 +201,6 @@ export default function InterviewPracticePage() {
   }
 
   async function startInterview() {
-    setLimitDetail(null)
     setChatError(null)
     setMessages([])
     setCurrentFeedback('')
@@ -227,9 +224,10 @@ export default function InterviewPracticePage() {
       speakIfEnabled(spoken)
       if (result.done) await finishSession(initialMessages)
     } catch (err) {
-      if (err.status === 402) {
-        setLimitDetail(err.detail)
-      } else {
+      // A 402 (token limit reached) already opens the global upgrade modal (see
+      // api/client.js's featureLimitHandler) -- nothing else to do here but leave the
+      // pre-start screen showing instead of transitioning into a broken "started" state.
+      if (err.status !== 402) {
         setStarted(true)
         setChatError(err.message)
       }
@@ -361,11 +359,6 @@ export default function InterviewPracticePage() {
 
       {!started ? (
         <Card className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-          {limitDetail && (
-            <div className="w-full max-w-md text-left">
-              <FeatureLimitNotice detail={limitDetail} onDismiss={() => setLimitDetail(null)} />
-            </div>
-          )}
           <div
             className="flex h-14 w-14 items-center justify-center rounded-full text-white"
             style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-2))' }}

@@ -18,6 +18,30 @@ export function setUnauthorizedHandler(handler) {
   unauthorizedHandler = handler
 }
 
+let featureLimitHandler = null
+
+/** Wired up once by UpgradeModalProvider so any gated AI feature hitting its token limit (402,
+ * see app/services/feature_gate.py) opens the upgrade modal automatically, without every page
+ * having to catch it individually. Called with the FeatureAccessDenied payload. */
+export function setFeatureLimitHandler(handler) {
+  featureLimitHandler = handler
+}
+
+let balanceChangedHandler = null
+
+/** Wired up once by UpgradeModalProvider so the token balance badge refreshes right after any
+ * gated AI feature successfully spends tokens — without threading query invalidation through
+ * every individual feature hook. */
+export function setBalanceChangedHandler(handler) {
+  balanceChangedHandler = handler
+}
+
+// Path prefixes whose successful, non-GET requests may have just spent tokens (see the
+// matching check_and_consume() call sites in the backend's app/routes/*.py).
+const GATED_PATH_PREFIXES = [
+  '/resume-builder', '/matching', '/interview', '/skill-assessment', '/roadmap', '/documents', '/career-coach',
+]
+
 function extractErrorMessage(detail) {
   if (!detail) return 'Something went wrong. Please try again.'
   if (typeof detail === 'string') return detail
@@ -91,7 +115,14 @@ export async function apiRequest(path, { method = 'GET', body, auth = false, que
       clearToken()
       unauthorizedHandler?.()
     }
+    if (response.status === 402) {
+      featureLimitHandler?.(data?.detail)
+    }
     throw new ApiError(response.status, extractErrorMessage(data?.detail), data?.detail)
+  }
+
+  if (method !== 'GET' && GATED_PATH_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    balanceChangedHandler?.()
   }
 
   return data

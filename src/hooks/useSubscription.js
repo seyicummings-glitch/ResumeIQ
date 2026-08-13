@@ -2,7 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as subscriptionsApi from '../api/subscriptions'
 
 export function useMySubscription() {
-  return useQuery({ queryKey: ['subscription', 'me'], queryFn: subscriptionsApi.getMySubscription })
+  return useQuery({
+    queryKey: ['subscription', 'me'],
+    queryFn: subscriptionsApi.getMySubscription,
+    // The token balance badge should feel close to real-time without a page reload — an
+    // immediate invalidation already fires right after any gated feature spends tokens (see
+    // api/client.js's balanceChangedHandler), this polling is just the fallback/catch-all.
+    refetchInterval: 20000,
+  })
 }
 
 export function usePublicPlans() {

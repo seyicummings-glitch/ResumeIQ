@@ -20,13 +20,11 @@ function AnalyticsSummary() {
   const { data, isLoading, isError } = useSubscriptionAnalytics()
   if (isLoading || isError || !data) return null
 
-  const totalRevenueCents = data.revenueByPlan.reduce((sum, r) => sum + r.revenueCents, 0)
-
   const tiles = [
+    { label: 'Total revenue', value: formatCents(data.totalRevenueCents) },
     { label: 'Active subscribers', value: data.activeSubscribers.toLocaleString() },
-    { label: 'Total credits purchased', value: data.totalCreditsPurchased.toLocaleString() },
-    { label: 'Credits consumed', value: data.creditsConsumed.toLocaleString() },
-    { label: 'Revenue from plans', value: formatCents(totalRevenueCents) },
+    { label: 'Total tokens purchased', value: data.totalCreditsPurchased.toLocaleString() },
+    { label: 'Tokens consumed', value: data.creditsConsumed.toLocaleString() },
     { label: 'Users near their limit', value: data.usersNearLimit.length.toLocaleString() },
   ]
 
@@ -80,6 +78,17 @@ function AnalyticsSummary() {
             {data.usersNearLimit.map((row) => (
               <Badge key={`${row.userId}-${row.featureKey}`} tone="danger">
                 {row.userName} — {row.featureLabel}: {row.used}/{row.limit}
+              </Badge>
+            ))}
+          </div>
+        </Card>
+        <Card>
+          <h3 className="mb-2 text-sm font-semibold text-text-h">Top paying users</h3>
+          <div className="flex flex-wrap gap-2">
+            {data.topPayingUsers.length === 0 && <p className="text-sm text-text">No payments recorded yet.</p>}
+            {data.topPayingUsers.map((row) => (
+              <Badge key={row.userId} tone="accent">
+                {row.userName} · {formatCents(row.totalPaidCents)}
               </Badge>
             ))}
           </div>

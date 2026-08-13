@@ -27,7 +27,6 @@ import clsx from 'clsx'
 import { useLearningRoadmap, useToggleRoadmapTopic, useRegenerateRoadmap } from '../hooks/useLearningRoadmap'
 import { trackRoadmapResourceClick } from '../api/roadmap'
 import { useCareerCoachContext } from '../coach/CareerCoachContext'
-import FeatureLimitNotice from '../components/subscription/FeatureLimitNotice'
 import Card from '../components/ui/Card'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
@@ -423,17 +422,15 @@ export default function LearningRoadmapPage() {
   const regenerateMutation = useRegenerateRoadmap()
   const { openCoach } = useCareerCoachContext()
   const { showToast } = useToast()
-  const [limitDetail, setLimitDetail] = useState(null)
 
   async function handleRegenerate() {
-    setLimitDetail(null)
     try {
       await regenerateMutation.mutateAsync()
       showToast('Generated a new roadmap.', { tone: 'success' })
     } catch (err) {
-      if (err.status === 402) {
-        setLimitDetail(err.detail)
-      } else {
+      // A 402 (token limit reached) already opens the global upgrade modal (see
+      // api/client.js's featureLimitHandler) -- no separate toast needed for that case.
+      if (err.status !== 402) {
         showToast(err.message, { tone: 'error' })
       }
     }
@@ -515,8 +512,6 @@ export default function LearningRoadmapPage() {
           </Button>
         </div>
       </div>
-
-      <FeatureLimitNotice detail={limitDetail} onDismiss={() => setLimitDetail(null)} />
 
       <Card>
         <div className="mb-2 flex items-center justify-between text-sm">

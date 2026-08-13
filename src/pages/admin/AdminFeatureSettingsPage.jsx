@@ -50,7 +50,14 @@ function FeatureRow({ feature }) {
       </Td>
       <Td>
         <div className="w-24">
-          <Input type="number" min="0" value={creditCost} onChange={(e) => setCreditCost(e.target.value)} disabled={!isPaid} />
+          <Input
+            type="number"
+            min="0"
+            value={creditCost}
+            onChange={(e) => setCreditCost(e.target.value)}
+            disabled={!isPaid}
+            title="Tokens deducted from the user's balance each time this feature is used"
+          />
         </div>
       </Td>
       <Td>
@@ -84,9 +91,10 @@ export default function AdminFeatureSettingsPage() {
       <div>
         <h2 className="text-lg font-semibold text-text-h">AI feature settings</h2>
         <p className="mt-1 text-sm text-text">
-          Decide which AI features require payment once a user's plan allowance runs out, and how many credits each
-          use costs. Changes apply immediately across the platform — no code changes or redeploys needed. "Gating
-          off" bypasses limits entirely for that feature (an emergency kill-switch), regardless of plan or credits.
+          Decide which AI features spend tokens and how many tokens each use costs. A "Free" feature never touches a
+          user's balance. Changes apply immediately across the platform — no code changes or redeploys needed.
+          "Gating off" bypasses the token check entirely for that feature (an emergency kill-switch), regardless of
+          balance.
         </p>
       </div>
 
@@ -94,7 +102,7 @@ export default function AdminFeatureSettingsPage() {
         <TableHead>
           <Th>Feature</Th>
           <Th>Free / Paid</Th>
-          <Th>Credit cost per use</Th>
+          <Th>Token cost per use</Th>
           <Th>Gating</Th>
           <Th>
             <span className="sr-only">Save</span>

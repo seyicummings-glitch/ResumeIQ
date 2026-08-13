@@ -5,6 +5,7 @@ import { useTheme } from '../../theme/ThemeContext'
 import SkipToContentLink from './SkipToContentLink'
 import Sidebar, { NAV_ITEMS } from './Sidebar'
 import GlobalCareerCoach from '../coach/GlobalCareerCoach'
+import TokenBalanceBadge from '../subscription/TokenBalanceBadge'
 import Button from '../ui/Button'
 
 export default function AppShell() {
@@ -25,6 +26,7 @@ export default function AppShell() {
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-bg px-6">
             <span className="font-mono text-xs text-text">{currentLabel}</span>
             <div className="flex items-center gap-2">
+              <TokenBalanceBadge />
               {isAdmin && !onAdminPages && (
                 <Button variant="secondary" size="sm" onClick={switchToAdminView}>
                   <Shield size={14} aria-hidden="true" />
