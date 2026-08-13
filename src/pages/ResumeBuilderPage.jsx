@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Send, Paperclip, ImagePlus, FileUp, X, Sparkles, FileText, Link2, Download } from 'lucide-react'
+import { Send, Paperclip, ImagePlus, FileUp, X, Sparkles, FileText, Link2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useResumes } from '../hooks/useResumes'
 import * as resumeApi from '../api/resume'
 import * as jdApi from '../api/jobDescription'
 import { useChatAboutResume, useUploadResumeForChat, useSaveEnhancedResume } from '../hooks/useResumeBuilder'
 import { useResumeBuilderDraft } from '../resume/ResumeBuilderDraftContext'
-import ResumeDocument, { RESUME_TEMPLATES, hasResumeContent } from '../resume/templates/ResumeDocument'
+import ResumeDocument, { hasResumeContent } from '../resume/templates/ResumeDocument'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
@@ -102,54 +102,16 @@ function TypingBubble() {
   )
 }
 
-function TemplatePicker({ template, onChange }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {RESUME_TEMPLATES.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          onClick={() => onChange(option.id)}
-          title={option.description}
-          className={clsx(
-            'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
-            template === option.id
-              ? 'border-accent bg-accent text-accent-contrast'
-              : 'border-border bg-surface text-text hover:text-text-h'
-          )}
-        >
-          {option.name}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function DraftPreview({ draft, sourceLabel, template, onTemplateChange, onSave, isSaving, isSaved }) {
+function DraftPreview({ draft, sourceLabel, onSave, isSaving, isSaved }) {
   const hasContent = hasResumeContent(draft)
 
   return (
     <Card className="flex h-full flex-col gap-0 p-0">
-      <div className="flex flex-col gap-2 border-b border-border px-4 py-3.5">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-text-h">Your resume draft</h2>
-          <div className="flex items-center gap-2">
-            {sourceLabel && (
-              <Badge tone={sourceLabel === 'AI-generated' ? 'accent' : 'neutral'}>{sourceLabel}</Badge>
-            )}
-            {hasContent && (
-              <button
-                type="button"
-                onClick={() => window.print()}
-                title="Download as PDF (uses your browser's print dialog — choose 'Save as PDF')"
-                className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-text hover:text-text-h"
-              >
-                <Download size={12} aria-hidden="true" /> Download PDF
-              </button>
-            )}
-          </div>
-        </div>
-        {hasContent && <TemplatePicker template={template} onChange={onTemplateChange} />}
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3.5">
+        <h2 className="text-sm font-semibold text-text-h">Your resume draft</h2>
+        {sourceLabel && (
+          <Badge tone={sourceLabel === 'AI-generated' ? 'accent' : 'neutral'}>{sourceLabel}</Badge>
+        )}
       </div>
 
       {!hasContent ? (
@@ -161,8 +123,8 @@ function DraftPreview({ draft, sourceLabel, template, onTemplateChange, onSave, 
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto bg-border/20 p-4">
-          <div id="resume-print-area" className="mx-auto max-w-[38rem] overflow-hidden rounded-md shadow-sm">
-            <ResumeDocument draft={draft} template={template} />
+          <div className="mx-auto max-w-[38rem] overflow-hidden rounded-md shadow-sm">
+            <ResumeDocument draft={draft} />
           </div>
         </div>
       )}
@@ -196,9 +158,6 @@ export default function ResumeBuilderPage() {
   const [jdExtracting, setJdExtracting] = useState(false)
   const [pendingAttachment, setPendingAttachment] = useState(null)
   const [attachmentLoading, setAttachmentLoading] = useState(false)
-  // Purely a preview/print choice — switches instantly since it only changes how the same
-  // draft data is rendered, never re-sent to the AI or re-generated.
-  const [template, setTemplate] = useState('professional')
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
   const attachmentInputRef = useRef(null)
@@ -507,8 +466,6 @@ export default function ResumeBuilderPage() {
           <DraftPreview
             draft={draft}
             sourceLabel={sourceLabel}
-            template={template}
-            onTemplateChange={setTemplate}
             onSave={handleSave}
             isSaving={saveMutation.isPending}
             isSaved={saveMutation.isSuccess}

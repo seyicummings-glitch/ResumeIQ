@@ -23,7 +23,6 @@ import {
   Coins,
   UserCheck,
   Receipt,
-  Wallet,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../auth/AuthContext'
@@ -39,7 +38,6 @@ export const NAV_ITEMS = [
   { to: '/interview-practice', label: 'Interview Practice', icon: MessageSquare },
   { to: '/history', label: 'Analysis History', icon: Clock },
   { to: '/resume/versions', label: 'Version History', icon: GitCompare },
-  { to: '/subscription', label: 'Plan & Credits', icon: Wallet },
   { to: '/profile', label: 'My Profile', icon: User },
 ]
 

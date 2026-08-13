@@ -20,7 +20,6 @@ import InterviewPracticePage from './pages/InterviewPracticePage'
 import LearningRoadmapPage from './pages/LearningRoadmapPage'
 import ResumeBuilderPage from './pages/ResumeBuilderPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
-import SubscriptionPage from './pages/SubscriptionPage'
 import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import AdminUsersPage from './pages/admin/AdminUsersPage'
 import AdminUserDetailPage from './pages/admin/AdminUserDetailPage'
@@ -63,7 +62,6 @@ export default function App() {
           <Route path="/roadmap" element={<LearningRoadmapPage />} />
           <Route path="/resume-builder" element={<ResumeBuilderPage />} />
           <Route path="/resume/versions" element={<VersionHistoryPage />} />
-          <Route path="/subscription" element={<SubscriptionPage />} />
         </Route>
 
         {/* Admin */}

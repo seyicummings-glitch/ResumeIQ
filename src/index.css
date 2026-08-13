@@ -85,27 +85,6 @@ h1, h2, h3, h4 {
   outline-offset: 2px;
 }
 
-/* AI Resume Builder's "Download PDF" button just calls window.print() — this scopes the
-   print output to the resume document itself (see ResumeDocument.jsx / ResumeBuilderPage.jsx)
-   instead of printing the whole app shell around it. */
-@media print {
-  body * {
-    visibility: hidden;
-  }
-  #resume-print-area,
-  #resume-print-area * {
-    visibility: visible;
-  }
-  #resume-print-area {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    max-width: none;
-    box-shadow: none;
-    border-radius: 0;
-  }
-}
-
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
