@@ -30,6 +30,75 @@ def _gemini_api_keys() -> list[str]:
     return [k for k in [os.getenv("GEMINI_API_KEY"), os.getenv("GEMINI_API_KEY_2")] if k]
 
 
+# ---------------------------------------------------------------------------
+# Output shape — a real, structured resume (headline, summary, skills, one
+# entry per job with its own title/company/dates/bullets, education,
+# certifications) rather than a flat summary/bullets/skills-blob. Contact
+# info (name, email, phone, LinkedIn, location) is deliberately NOT part of
+# this schema — it's never AI-generated; app/routes/resume_builder.py fills
+# it in straight from the user's own profile fields, which is both more
+# reliable and structurally prevents the AI from ever inventing someone's
+# contact details.
+# ---------------------------------------------------------------------------
+
+_EXPERIENCE_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "company": {"type": "string"},
+        "start_date": {"type": "string"},
+        "end_date": {"type": "string"},
+        "bullets": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["title", "company", "start_date", "end_date", "bullets"],
+    "additionalProperties": False,
+}
+
+_EDUCATION_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "degree": {"type": "string"},
+        "school": {"type": "string"},
+        "date": {"type": "string"},
+    },
+    "required": ["degree", "school", "date"],
+    "additionalProperties": False,
+}
+
+_RESUME_FIELDS = {
+    "title": {"type": "string"},
+    "summary": {"type": "string"},
+    "skills": {"type": "array", "items": {"type": "string"}},
+    "experience": {"type": "array", "items": _EXPERIENCE_ITEM_SCHEMA},
+    "education": {"type": "array", "items": _EDUCATION_ITEM_SCHEMA},
+    "certifications": {"type": "array", "items": {"type": "string"}},
+}
+_RESUME_FIELD_KEYS = list(_RESUME_FIELDS.keys())
+
+BUILDER_SCHEMA = {
+    "type": "object",
+    "properties": dict(_RESUME_FIELDS),
+    "required": _RESUME_FIELD_KEYS,
+    "additionalProperties": False,
+}
+
+CHAT_SCHEMA = {
+    "type": "object",
+    "properties": {"reply": {"type": "string"}, **_RESUME_FIELDS},
+    "required": ["reply"] + _RESUME_FIELD_KEYS,
+    "additionalProperties": False,
+}
+
+_GROQ_RESUME_FIELDS_SPEC = (
+    '"title" (string — a professional headline like "Marketing & Sales Professional"), '
+    '"summary" (string), "skills" (array of strings, one per skill — not grouped text), '
+    '"experience" (array of objects, one per job, each with "title" (string), "company" (string), '
+    '"start_date" (string), "end_date" (string, "Present" if current), "bullets" (array of strings)), '
+    '"education" (array of objects, each with "degree" (string), "school" (string), "date" (string)), '
+    '"certifications" (array of strings)'
+)
+
+
 # --- Groq fallback -----------------------------------------------------------
 # Automatic second provider for when Gemini's quota/rate-limit is hit (429).
 # Uses Groq's OpenAI-compatible endpoint via the `openai` SDK (see
@@ -53,9 +122,7 @@ def _generate_via_groq(resume_text: str, missing_skills: list[str]) -> dict:
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is not configured")
 
-    prompt = _build_prompt(resume_text, missing_skills) + groq_json_instructions(
-        '"summary" (string), "experience_bullets" (array of strings), "skills_section" (string)'
-    )
+    prompt = _build_prompt(resume_text, missing_skills) + groq_json_instructions(_GROQ_RESUME_FIELDS_SPEC)
 
     client = groq_client(api_key)
     response = client.chat.completions.create(
@@ -66,7 +133,7 @@ def _generate_via_groq(resume_text: str, missing_skills: list[str]) -> dict:
         response_format={"type": "json_object"},
     )
     result = json.loads(response.choices[0].message.content)
-    for key in ("summary", "experience_bullets", "skills_section"):
+    for key in _RESUME_FIELD_KEYS:
         if key not in result:
             raise ValueError(f"Groq response missing required key: {key}")
     result["source"] = "ai"
@@ -89,9 +156,7 @@ def _chat_via_groq(
     conversation: list[dict],
     resume_text: str,
     missing_skills: list[str],
-    current_summary: str,
-    current_experience_bullets: list[str],
-    current_skills_section: str,
+    current_draft: dict,
     jd_content: str | None = None,
 ) -> dict:
     """Groq equivalent of the Gemini call in chat_about_resume — same grounding/
@@ -104,10 +169,8 @@ def _chat_via_groq(
         raise RuntimeError("GROQ_API_KEY is not configured")
 
     system_prompt = _build_chat_system_prompt(
-        resume_text, missing_skills, current_summary, current_experience_bullets, current_skills_section, jd_content
-    ) + groq_json_instructions(
-        '"reply" (string), "summary" (string), "experience_bullets" (array of strings), "skills_section" (string)'
-    )
+        resume_text, missing_skills, current_draft, jd_content
+    ) + groq_json_instructions('"reply" (string), plus ' + _GROQ_RESUME_FIELDS_SPEC)
 
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(
@@ -124,7 +187,7 @@ def _chat_via_groq(
         response_format={"type": "json_object"},
     )
     result = json.loads(response.choices[0].message.content)
-    for key in ("reply", "summary", "experience_bullets", "skills_section"):
+    for key in ["reply"] + _RESUME_FIELD_KEYS:
         if key not in result:
             raise ValueError(f"Groq response missing required key: {key}")
     result["source"] = "ai"
@@ -135,18 +198,13 @@ def _try_groq_chat(
     conversation: list[dict],
     resume_text: str,
     missing_skills: list[str],
-    current_summary: str,
-    current_experience_bullets: list[str],
-    current_skills_section: str,
+    current_draft: dict,
     jd_content: str | None = None,
 ) -> dict | None:
     """Never raises — returns None on any failure so the caller can fall through
     to the existing deterministic fallback instead of surfacing an error."""
     try:
-        result = _chat_via_groq(
-            conversation, resume_text, missing_skills, current_summary, current_experience_bullets,
-            current_skills_section, jd_content,
-        )
+        result = _chat_via_groq(conversation, resume_text, missing_skills, current_draft, jd_content)
         logger.info("resume_builder.chat_about_resume served by groq (gemini quota/rate-limit hit)")
         return result
     except Exception:
@@ -170,35 +228,35 @@ def _is_daily_quota_error(e: genai_errors.ClientError) -> bool:
                 return True
     return False
 
-BUILDER_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "summary": {"type": "string"},
-        "experience_bullets": {
-            "type": "array",
-            "items": {"type": "string"}
-        },
-        "skills_section": {"type": "string"}
-    },
-    "required": ["summary", "experience_bullets", "skills_section"],
-    "additionalProperties": False
-}
-
 
 def _build_prompt(resume_text: str, missing_skills: list[str]) -> str:
     prompt = (
-        "You are an expert resume writer. Rewrite the following resume to make it stronger, "
-        "using ONLY the experience and facts already present in the resume text below.\n\n"
+        "You are an expert resume writer producing a complete, professionally structured resume — "
+        "the kind with a clear headline, a tight summary, a skills line, one clearly separated entry "
+        "per job (title, company, dates, quantified bullets), an education section, and a "
+        "certifications section — using ONLY the experience and facts already present in the resume "
+        "text below.\n\n"
         "Do the following:\n"
-        "1. Rewrite the professional summary to be sharper and more compelling (2-4 sentences).\n"
-        "2. Rewrite up to 6 of the strongest experience bullet points to be more quantified and "
-        "impactful (use metrics/numbers only if they are already implied or present in the original "
-        "text — do not invent statistics).\n"
-        "3. Produce a reorganized, categorized skills section (e.g. grouped by category such as "
-        "'Languages', 'Frameworks', 'Tools', etc., as appropriate).\n\n"
-        "CRITICAL RULE: Never fabricate skills, credentials, employers, titles, or accomplishments the "
-        "person does not plausibly have. Do not claim experience with a technology unless the resume "
-        "already shows evidence of related, transferable experience.\n\n"
+        "1. Write a short professional headline/title (e.g. \"Senior Backend Engineer\" or "
+        "\"Marketing & Sales Professional\") that reflects their most recent or strongest role.\n"
+        "2. Rewrite the professional summary to be sharper and more compelling (2-4 sentences).\n"
+        "3. Produce a flat list of individual skills (not grouped into categories, not one long "
+        "sentence) — each entry should be a single skill name, ready to display as a bullet-separated "
+        "line.\n"
+        "4. Extract EVERY job found in the resume as its own structured entry: job title, company "
+        "name, start date, end date (use \"Present\" if it's their current role), and up to 5 "
+        "rewritten, quantified bullet points per job (use metrics/numbers only if they are already "
+        "implied or present in the original text — do not invent statistics). Preserve the resume's "
+        "own chronological order.\n"
+        "5. Extract every education entry found (degree, school/institution, graduation date or "
+        "expected date). Return an empty list if the resume genuinely has none — never invent one.\n"
+        "6. Extract every certification/license mentioned. Return an empty list if there are none — "
+        "never invent one.\n\n"
+        "CRITICAL RULE: Never fabricate skills, credentials, employers, job titles, dates, degrees, "
+        "schools, or accomplishments the person does not plausibly have. Do not claim experience with "
+        "a technology unless the resume already shows evidence of related, transferable experience. "
+        "If a section (education, certifications) has no basis anywhere in the resume text, return it "
+        "as an empty list rather than guessing.\n\n"
         f"Resume:\n{resume_text[:6000]}"
     )
 
@@ -208,7 +266,7 @@ def _build_prompt(resume_text: str, missing_skills: list[str]) -> str:
             f"\n\nThe following skills were identified as missing when this resume was matched against "
             f"a target job: {skills_list}. If — and only if — the resume shows genuinely related or "
             "transferable experience for any of these skills, you may naturally incorporate that skill "
-            "into the skills section or an experience bullet, phrased honestly (e.g. 'exposure to', "
+            "into the skills list or an experience bullet, phrased honestly (e.g. 'exposure to', "
             "'familiarity with') rather than claiming deep expertise. Do NOT add a skill if there is no "
             "plausible basis for it anywhere in the resume — it is far better to omit a missing skill "
             "than to fabricate a claim."
@@ -218,11 +276,12 @@ def _build_prompt(resume_text: str, missing_skills: list[str]) -> str:
 
 
 def generate_enhanced_resume(resume_text: str, missing_skills: list[str], fallback_data: dict, ai_enabled: bool = True) -> dict:
-    """Call Gemini to produce an enhanced summary/experience/skills section for a resume.
-    Falls back to a deterministic, lightly-reformatted version of the original content if the
-    API key is missing, AI features have been disabled platform-wide (ai_enabled=False, set via
-    Admin Settings), or the call fails. Uses the free-tier Gemini API (server-wide GEMINI_API_KEY
-    env var) rather than a per-user key."""
+    """Call Gemini to produce a complete structured resume (headline, summary, skills, per-job
+    experience entries, education, certifications) from the candidate's resume text. Falls back to
+    a deterministic, lightly-reformatted version of the original content if the API key is missing,
+    AI features have been disabled platform-wide (ai_enabled=False, set via Admin Settings), or the
+    call fails. Uses the free-tier Gemini API (server-wide GEMINI_API_KEY env var) rather than a
+    per-user key."""
     if not ai_enabled:
         return _fallback_response("AI resume building has been disabled by the administrator.", fallback_data)
 
@@ -238,10 +297,10 @@ def generate_enhanced_resume(resume_text: str, missing_skills: list[str], fallba
                 model=MODEL,
                 contents=_build_prompt(resume_text, missing_skills),
                 config=genai_types.GenerateContentConfig(
-                    # 2048 wasn't enough headroom once the model's internal "thinking"
-                    # tokens are counted against the same budget — this raises it the
-                    # same way the skill-assessment and interviewer services were fixed.
-                    max_output_tokens=6000,
+                    # Raised from 2048/6000 in earlier revisions of this schema — a full
+                    # per-job-structured resume (several jobs, each with its own bullets)
+                    # needs materially more output tokens than the old flat-bullets shape.
+                    max_output_tokens=8000,
                     thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
                     response_mime_type="application/json",
                     response_json_schema=BUILDER_SCHEMA,
@@ -274,33 +333,43 @@ def generate_enhanced_resume(resume_text: str, missing_skills: list[str], fallba
     return _fallback_response("AI resume building is temporarily rate-limited. Showing your original content instead.", fallback_data)
 
 
-CHAT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "reply": {"type": "string"},
-        "summary": {"type": "string"},
-        "experience_bullets": {
-            "type": "array",
-            "items": {"type": "string"}
-        },
-        "skills_section": {"type": "string"}
-    },
-    "required": ["reply", "summary", "experience_bullets", "skills_section"],
-    "additionalProperties": False
-}
+def _draft_state_text(current_draft: dict) -> str:
+    experience = current_draft.get("experience") or []
+    education = current_draft.get("education") or []
+    certifications = current_draft.get("certifications") or []
+    skills = current_draft.get("skills") or []
+
+    experience_text = "\n".join(
+        f"- {job.get('title', '')} at {job.get('company', '')} "
+        f"({job.get('start_date', '')} - {job.get('end_date', '')}): "
+        + "; ".join(job.get("bullets") or [])
+        for job in experience
+    ) or "(none)"
+    education_text = "\n".join(
+        f"- {edu.get('degree', '')}, {edu.get('school', '')} ({edu.get('date', '')})" for edu in education
+    ) or "(none)"
+
+    return (
+        f"Title: {current_draft.get('title', '')}\n"
+        f"Summary: {current_draft.get('summary', '')}\n"
+        f"Skills: {', '.join(skills) if skills else '(none)'}\n"
+        f"Experience:\n{experience_text}\n"
+        f"Education:\n{education_text}\n"
+        f"Certifications: {', '.join(certifications) if certifications else '(none)'}"
+    )
 
 
 def _build_chat_system_prompt(
     resume_text: str,
     missing_skills: list[str],
-    current_summary: str,
-    current_experience_bullets: list[str],
-    current_skills_section: str,
+    current_draft: dict,
     jd_content: str | None = None,
 ) -> str:
-    bullets_text = "\n".join(f"- {b}" for b in current_experience_bullets) if current_experience_bullets else "(none)"
     skills_list = ", ".join(missing_skills) if missing_skills else "none noted"
-    has_draft = bool(current_summary or current_experience_bullets or current_skills_section)
+    has_draft = bool(
+        current_draft.get("summary") or current_draft.get("experience") or current_draft.get("skills")
+        or current_draft.get("education") or current_draft.get("certifications")
+    )
 
     if resume_text:
         grounding = (
@@ -310,16 +379,13 @@ def _build_chat_system_prompt(
     else:
         grounding = (
             "The user hasn't uploaded or saved a resume yet. Build their resume from what they tell you "
-            "in this conversation instead — ask about their target role, work history, and skills if you "
-            "don't have enough yet. They can also upload an existing CV at any point using the upload "
-            "control, which becomes your grounding source from then on."
+            "in this conversation instead — ask about their target role, work history (job titles, "
+            "companies, dates), education, and skills if you don't have enough yet. They can also upload "
+            "an existing CV at any point using the upload control, which becomes your grounding source "
+            "from then on."
         )
 
-    draft_state = (
-        f"Summary: {current_summary}\nExperience bullets:\n{bullets_text}\nSkills section: {current_skills_section}"
-        if has_draft
-        else "(nothing drafted yet)"
-    )
+    draft_state = _draft_state_text(current_draft) if has_draft else "(nothing drafted yet)"
 
     jd_block = (
         f"\n\nTarget job description the user wants this resume tailored to match (they extracted this from a "
@@ -334,7 +400,9 @@ def _build_chat_system_prompt(
         "You are an expert, proactive AI resume-building assistant and career coach — the kind of "
         "conversational assistant users expect from a modern AI chat assistant, not a rigid form "
         "that only executes literal commands. You're having an ongoing conversation with the user to help "
-        "them build a new resume or improve an existing one.\n\n"
+        "them build a complete, professionally structured resume: a headline, a summary, a skills list, "
+        "one clearly separated entry per job (title, company, dates, bullets), an education section, and "
+        "a certifications section.\n\n"
         f"{grounding}\n\n"
         f"Skills identified as missing against a target job (if any): {skills_list}\n\n"
         f"Current draft of the resume you're building/editing together:\n{draft_state}"
@@ -345,11 +413,12 @@ def _build_chat_system_prompt(
         "don't ask them to be more specific — immediately start gathering what you need by asking a "
         "focused question (e.g. their target role, most recent job, or which section to start with).\n"
         "- Ask one or two focused follow-up questions at a time, not a long checklist — this is a "
-        "conversation, not an intake form. Once you have enough for one section, use it, then move to the "
-        "next gap.\n"
-        "- Actively identify what's missing or weak — no quantified impact, a thin skills section, a "
-        "generic summary, no clear target role — and say so, either suggesting a concrete fix or asking "
-        "for the specific detail you need to fix it, rather than staying silent about it.\n"
+        "conversation, not an intake form. Once you have enough for one section (e.g. one job's title, "
+        "company, and dates), use it, then move to the next gap.\n"
+        "- Actively identify what's missing or weak — no quantified impact, a thin skills list, a "
+        "generic summary, a job with no dates, no education/certifications section at all — and say so, "
+        "either suggesting a concrete fix or asking for the specific detail you need to fix it, rather "
+        "than staying silent about it.\n"
         "- When you write or revise a bullet or summary, briefly note WHY it's stronger (e.g. \"added a "
         "metric\", \"led with the impact\") so the user learns from it, not just receives output.\n"
         "- Offer career judgment when it's relevant: if their target role doesn't match their strongest "
@@ -359,17 +428,19 @@ def _build_chat_system_prompt(
         "- Apply explicit edit requests (add/remove/change something) to the CURRENT DRAFT above, "
         "building on it incrementally, exactly as asked.\n\n"
         "Ground rules (never break these):\n"
-        "- Never fabricate skills, credentials, employers, titles, or accomplishments — only include what "
-        "the user has told you (via a saved resume or this conversation) or what's plausibly implied by "
-        "it.\n"
-        "- If you don't yet have enough real information to write or update a section, don't invent "
-        "placeholder content — ask the user for the details instead, and leave that section unchanged in "
-        "the draft.\n"
+        "- Never fabricate skills, credentials, employers, job titles, dates, degrees, schools, or "
+        "accomplishments — only include what the user has told you (via a saved resume or this "
+        "conversation) or what's plausibly implied by it.\n"
+        "- If you don't yet have enough real information for a job's title/company/dates, or for an "
+        "education/certification entry, don't invent placeholder content — ask the user for the details "
+        "instead, and leave that entry out of the draft until you have it.\n"
         "- Keep replies conversational and focused — typically 2-6 sentences; longer only when you're "
         "listing specific suggestions or a couple of questions worth asking together.\n"
-        "- Always return the FULL current state of the resume (summary, all experience bullets, full "
-        "skills section) in the structured fields, reflecting any changes from this turn — even fields "
-        "you didn't touch."
+        "- Always return the FULL current state of the resume (title, summary, all skills, all "
+        "experience entries, all education entries, all certifications) in the structured fields, "
+        "reflecting any changes from this turn — even fields you didn't touch. Contact info (name, "
+        "email, phone, location) is handled separately by the platform — never ask the user for it or "
+        "include it in your reply."
     )
 
 
@@ -377,25 +448,26 @@ def chat_about_resume(
     conversation: list[dict],
     resume_text: str,
     missing_skills: list[str],
-    current_summary: str,
-    current_experience_bullets: list[str],
-    current_skills_section: str,
+    current_draft: dict,
     ai_enabled: bool = True,
     jd_content: str | None = None,
 ) -> dict:
     """One turn of AI-assisted, conversational resume editing. conversation is a list of
     {"role": "user"|"assistant", "content": str} in chronological order, not including the reply
-    being generated now. Uses the free-tier Gemini API (server-wide GEMINI_API_KEY env var).
-    Resume chat editing has no rule-based equivalent, so if AI is disabled/unavailable the draft
-    is returned unchanged with an explanatory reply rather than a fabricated edit."""
+    being generated now. current_draft holds whatever the frontend currently has for
+    title/summary/skills/experience/education/certifications (any/all may be empty). Uses the
+    free-tier Gemini API (server-wide GEMINI_API_KEY env var). Resume chat editing has no
+    rule-based equivalent, so if AI is disabled/unavailable the draft is returned unchanged with an
+    explanatory reply rather than a fabricated edit."""
+    def _unchanged_draft() -> dict:
+        return {key: current_draft.get(key, [] if key != "title" and key != "summary" else "") for key in _RESUME_FIELD_KEYS}
+
     unavailable_reply = {
         "reply": (
             "AI resume chat isn't available right now — the AI service isn't configured. You can still "
             "use the one-shot Generate button, or edit the text directly."
         ),
-        "summary": current_summary,
-        "experience_bullets": current_experience_bullets,
-        "skills_section": current_skills_section,
+        **_unchanged_draft(),
         "source": "fallback",
     }
 
@@ -421,11 +493,10 @@ def chat_about_resume(
                 model=MODEL,
                 contents=contents,
                 config=genai_types.GenerateContentConfig(
-                    max_output_tokens=6000,
+                    max_output_tokens=8000,
                     thinking_config=genai_types.ThinkingConfig(thinking_level="LOW"),
                     system_instruction=_build_chat_system_prompt(
-                        resume_text, missing_skills, current_summary, current_experience_bullets,
-                        current_skills_section, jd_content,
+                        resume_text, missing_skills, current_draft, jd_content,
                     ),
                     response_mime_type="application/json",
                     response_json_schema=CHAT_SCHEMA,
@@ -456,10 +527,7 @@ def chat_about_resume(
             return error_reply
 
     # Every configured Gemini key hit a 429 — try Groq before giving up.
-    groq_result = _try_groq_chat(
-        conversation, resume_text, missing_skills, current_summary, current_experience_bullets,
-        current_skills_section, jd_content,
-    )
+    groq_result = _try_groq_chat(conversation, resume_text, missing_skills, current_draft, jd_content)
     if groq_result is not None:
         return groq_result
 
@@ -474,29 +542,43 @@ def chat_about_resume(
     return error_reply
 
 
+def _split_lines(text: str, limit: int | None = None) -> list[str]:
+    lines = [line.strip(" -•\t") for line in (text or "").split("\n") if line.strip()]
+    return lines[:limit] if limit else lines
+
+
 def _fallback_response(message: str, fallback_data: dict) -> dict:
+    """Deterministic, non-AI resume structuring — reuses whatever
+    resume_structurer.py already parsed out of the original file (summary,
+    experience, education, certifications, skills) rather than inventing
+    anything. Experience can't be reliably split into distinct per-job
+    title/company/dates without AI, so it's returned as a single entry
+    holding the original text as bullets — genuinely less structured than
+    the AI path, but never fabricated."""
     logger.info("resume_builder.generate_enhanced_resume served by fallback (%s)", message)
     original_summary = (fallback_data.get("original_summary") or "").strip()
     original_experience = (fallback_data.get("original_experience") or "").strip()
+    original_education = (fallback_data.get("original_education") or "").strip()
+    original_certifications = (fallback_data.get("original_certifications") or "").strip()
     original_skills = fallback_data.get("original_skills") or []
+    original_title = (fallback_data.get("original_title") or "").strip()
 
     summary = original_summary if original_summary else "No professional summary was found on your resume."
 
+    experience = []
     if original_experience:
-        raw_lines = [line.strip(" -•\t") for line in original_experience.split("\n") if line.strip()]
-        experience_bullets = raw_lines[:6] if raw_lines else [original_experience]
-    else:
-        experience_bullets = ["No experience bullets were found on your resume."]
-
-    if original_skills:
-        skills_section = ", ".join(original_skills)
-    else:
-        skills_section = "No skills were found on your resume."
+        experience = [{
+            "title": "", "company": "", "start_date": "", "end_date": "",
+            "bullets": _split_lines(original_experience, limit=8),
+        }]
 
     return {
+        "title": original_title or "Professional",
         "summary": summary,
-        "experience_bullets": experience_bullets,
-        "skills_section": skills_section,
+        "skills": original_skills,
+        "experience": experience,
+        "education": [{"degree": line, "school": "", "date": ""} for line in _split_lines(original_education)],
+        "certifications": _split_lines(original_certifications),
         "overall_assessment": message,
-        "source": "fallback"
+        "source": "fallback",
     }

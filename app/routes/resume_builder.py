@@ -33,6 +33,20 @@ def _get_latest_active_resume(db: Session, user_id: int) -> Resume | None:
     )
 
 
+def _contact_info(user: User) -> dict:
+    """Real contact details, straight from the user's own profile — never
+    AI-generated. Keeping this entirely separate from the AI-produced draft
+    means the model is never even in a position to invent a name, email,
+    phone number, or location."""
+    return {
+        "full_name": user.full_name or "",
+        "email": user.email or "",
+        "phone": user.phone or "",
+        "linkedin": user.linkedin_url or "",
+        "location": user.location or "",
+    }
+
+
 @router.post("/generate")
 def generate_resume(
     db: Session = Depends(get_db),
@@ -56,7 +70,10 @@ def generate_resume(
     fallback_data = {
         "original_summary": resume.raw_text[:500] if resume.raw_text else "",
         "original_experience": resume.experience or "",
+        "original_education": resume.education or "",
+        "original_certifications": resume.certifications or "",
         "original_skills": extract_skills_list(resume.skills or ""),
+        "original_title": current_user.target_role or "",
     }
 
     result = generate_enhanced_resume(
@@ -66,6 +83,7 @@ def generate_resume(
         ai_enabled=is_ai_enabled(db),
     )
     result["resume_id"] = resume.id
+    result["contact"] = _contact_info(current_user)
 
     track_event(
         db, EVENT_TYPES["AI_RESUME_SUGGESTION_GENERATED"], FEATURE_AI_BUILDER, user_id=current_user.id,
@@ -85,11 +103,28 @@ class ChatAttachment(BaseModel):
     data_base64: str
 
 
+class ExperienceItemInput(BaseModel):
+    title: str = ""
+    company: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    bullets: list[str] = []
+
+
+class EducationItemInput(BaseModel):
+    degree: str = ""
+    school: str = ""
+    date: str = ""
+
+
 class ResumeBuilderChatInput(BaseModel):
     conversation: list[ResumeBuilderChatMessage] = []
+    current_title: str = ""
     current_summary: str = ""
-    current_experience_bullets: list[str] = []
-    current_skills_section: str = ""
+    current_skills: list[str] = []
+    current_experience: list[ExperienceItemInput] = []
+    current_education: list[EducationItemInput] = []
+    current_certifications: list[str] = []
     # Full text of a target job description (e.g. extracted from a URL the user
     # pasted in chat) — the AI itself can't browse links, so the frontend
     # extracts the real text via the existing /job-description/parse-url
@@ -97,6 +132,16 @@ class ResumeBuilderChatInput(BaseModel):
     jd_content: str = ""
     # An image, screenshot, PDF, or document attached to this turn's message, if any.
     attachment: ChatAttachment | None = None
+
+    def draft_dict(self) -> dict:
+        return {
+            "title": self.current_title,
+            "summary": self.current_summary,
+            "skills": self.current_skills,
+            "experience": [item.model_dump() for item in self.current_experience],
+            "education": [item.model_dump() for item in self.current_education],
+            "certifications": self.current_certifications,
+        }
 
 
 @router.post("/chat")
@@ -134,6 +179,7 @@ def chat_resume(
             missing_skills = analysis.result_json.get("skill_match", {}).get("missing_skills", []) or []
 
     conversation = [m.model_dump() for m in data.conversation]
+    draft = data.draft_dict()
 
     if data.attachment:
         try:
@@ -155,10 +201,9 @@ def chat_resume(
         if analysis_result["description"] is None:
             return {
                 "reply": analysis_result["message"] or "Couldn't analyze that attachment. Your draft wasn't changed.",
-                "summary": data.current_summary,
-                "experience_bullets": data.current_experience_bullets,
-                "skills_section": data.current_skills_section,
+                **draft,
                 "source": "fallback",
+                "contact": _contact_info(current_user),
             }
 
         attachment_note = f"\n\n[Attached file: {data.attachment.filename}]\n{analysis_result['description']}"
@@ -167,23 +212,64 @@ def chat_resume(
         else:
             conversation.append({"role": "user", "content": attachment_note.strip()})
 
-    return chat_about_resume(
+    result = chat_about_resume(
         conversation=conversation,
         resume_text=resume_text,
         missing_skills=missing_skills,
-        current_summary=data.current_summary,
-        current_experience_bullets=data.current_experience_bullets,
-        current_skills_section=data.current_skills_section,
+        current_draft=draft,
         ai_enabled=is_ai_enabled(db),
         jd_content=data.jd_content or None,
     )
+    result["contact"] = _contact_info(current_user)
+    return result
 
 
 class SaveEnhancedResumeInput(BaseModel):
     resume_id: int | None = None
+    title: str = ""
     summary: str
-    experience_bullets: list[str]
-    skills_section: str
+    skills: list[str] = []
+    experience: list[ExperienceItemInput] = []
+    education: list[EducationItemInput] = []
+    certifications: list[str] = []
+
+
+def _format_raw_text(contact: dict, data: "SaveEnhancedResumeInput") -> str:
+    """Builds a well-formatted, plain-text resume from the structured draft —
+    a real header (name, title, contact line) followed by sections using the
+    exact header phrases resume_structurer.py already recognizes
+    ("PROFESSIONAL SUMMARY", "CORE SKILLS", "PROFESSIONAL EXPERIENCE",
+    "EDUCATION", "CERTIFICATIONS"), so this resume parses back out correctly
+    (skills matching, ATS scoring, re-analysis) exactly like an uploaded one."""
+    lines = []
+    if contact.get("full_name"):
+        lines.append(contact["full_name"])
+    if data.title:
+        lines.append(data.title)
+    contact_line = " | ".join(filter(None, [contact.get("email"), contact.get("phone"), contact.get("linkedin"), contact.get("location")]))
+    if contact_line:
+        lines.append(contact_line)
+
+    lines += ["", "PROFESSIONAL SUMMARY", data.summary or ""]
+
+    lines += ["", "CORE SKILLS", " • ".join(data.skills) if data.skills else ""]
+
+    lines += ["", "PROFESSIONAL EXPERIENCE"]
+    for job in data.experience:
+        header = " | ".join(filter(None, [job.title, job.company]))
+        dates = " – ".join(filter(None, [job.start_date, job.end_date]))
+        lines.append(f"{header}    {dates}".strip())
+        lines += [f"- {bullet}" for bullet in job.bullets]
+
+    lines += ["", "EDUCATION"]
+    for edu in data.education:
+        entry = ", ".join(filter(None, [edu.degree, edu.school]))
+        lines.append(f"{entry} ({edu.date})" if edu.date else entry)
+
+    lines += ["", "CERTIFICATIONS"]
+    lines += [f"- {cert}" for cert in data.certifications]
+
+    return "\n".join(lines).strip()
 
 
 @router.post("/save")
@@ -211,13 +297,17 @@ def save_enhanced_resume(
         is not None
     )
 
-    experience_text = "\n".join(data.experience_bullets)
-    raw_text = (
-        f"SUMMARY\n{data.summary}\n\n"
-        f"EXPERIENCE\n{experience_text}\n\n"
-        f"SKILLS\n{data.skills_section}"
+    contact = _contact_info(current_user)
+    raw_text = _format_raw_text(contact, data)
+    experience_text = "\n".join(
+        " | ".join(filter(None, [job.title, job.company, job.start_date, job.end_date])) + "\n"
+        + "\n".join(f"- {bullet}" for bullet in job.bullets)
+        for job in data.experience
     )
-    new_skills = extract_skills_list(data.skills_section)
+    education_text = "\n".join(
+        ", ".join(filter(None, [edu.degree, edu.school, edu.date])) for edu in data.education
+    )
+    certifications_text = "\n".join(data.certifications)
 
     # Version numbers must be unique per user, not just "original + 1" — two
     # saves off the same source resume would otherwise both claim v2.
@@ -233,10 +323,13 @@ def save_enhanced_resume(
         user_id=current_user.id,
         filename=f"{original.filename} (AI-enhanced)" if original else "AI-built resume",
         raw_text=raw_text,
-        skills=", ".join(new_skills),
+        skills=", ".join(data.skills),
         experience=experience_text,
-        education=original.education if original else None,
-        certifications=original.certifications if original else None,
+        # Falls back to the source resume's own education/certifications only when the
+        # draft genuinely has none — a real chat-built draft's structured entries (even
+        # if it only ever produced one) always take precedence over stale prior content.
+        education=education_text or (original.education if original else None),
+        certifications=certifications_text or (original.certifications if original else None),
         projects=original.projects if original else None,
         version=new_version,
         label=f"v{new_version} (AI-enhanced)" if original else f"v{new_version} (AI-built)",

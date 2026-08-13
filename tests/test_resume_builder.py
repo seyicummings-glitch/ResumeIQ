@@ -28,6 +28,34 @@ def _gemini_quota_exhausted_error():
     )
 
 
+def _resume_payload(**overrides):
+    """A complete structured-resume response payload, matching BUILDER_SCHEMA/
+    CHAT_SCHEMA's required keys — used as the base for every mocked AI reply."""
+    payload = {
+        "title": "Backend Engineer",
+        "summary": "Results-driven backend engineer with 5 years of experience.",
+        "skills": ["Python", "SQL"],
+        "experience": [{
+            "title": "Software Engineer", "company": "Acme Corp",
+            "start_date": "2020", "end_date": "Present",
+            "bullets": ["Built and scaled REST APIs serving 1M+ requests/day."],
+        }],
+        "education": [],
+        "certifications": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+_EMPTY_DRAFT = {"title": "", "summary": "", "skills": [], "experience": [], "education": [], "certifications": []}
+
+
+def _draft(**overrides):
+    draft = dict(_EMPTY_DRAFT)
+    draft.update(overrides)
+    return draft
+
+
 def _mock_groq_response(payload: dict) -> Mock:
     response = Mock()
     response.choices = [Mock(message=Mock(content=json.dumps(payload)))]
@@ -43,6 +71,8 @@ def _two_key_client_factory(key1_client, key2_client):
     return factory
 
 
+# --- Deterministic fallback ----------------------------------------------------
+
 def test_no_api_key_returns_fallback(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
@@ -52,12 +82,19 @@ def test_no_api_key_returns_fallback(monkeypatch):
         {
             "original_summary": "Experienced backend engineer.",
             "original_experience": "Built APIs at Acme Corp.",
+            "original_education": "BSc Computer Science, MIT",
+            "original_certifications": "AWS Certified Solutions Architect",
             "original_skills": ["Python", "SQL"],
+            "original_title": "Backend Engineer",
         },
     )
     assert result["source"] == "fallback"
     assert result["summary"] == "Experienced backend engineer."
-    assert "Python" in result["skills_section"]
+    assert result["title"] == "Backend Engineer"
+    assert "Python" in result["skills"]
+    assert result["experience"][0]["bullets"] == ["Built APIs at Acme Corp."]
+    assert result["education"] == [{"degree": "BSc Computer Science, MIT", "school": "", "date": ""}]
+    assert result["certifications"] == ["AWS Certified Solutions Architect"]
     assert "overall_assessment" in result
 
 
@@ -67,8 +104,10 @@ def test_no_api_key_returns_fallback_with_empty_data(monkeypatch):
     result = generate_enhanced_resume("some resume text", [], {})
     assert result["source"] == "fallback"
     assert result["summary"]
-    assert isinstance(result["experience_bullets"], list)
-    assert result["skills_section"]
+    assert isinstance(result["skills"], list)
+    assert isinstance(result["experience"], list)
+    assert result["education"] == []
+    assert result["certifications"] == []
 
 
 def test_ai_disabled_returns_fallback_even_with_api_key(monkeypatch):
@@ -78,23 +117,22 @@ def test_ai_disabled_returns_fallback_even_with_api_key(monkeypatch):
     assert "disabled by the administrator" in result["overall_assessment"]
 
 
+# --- Gemini success/error paths --------------------------------------------------
+
 @patch("app.services.resume_builder.genai.Client")
 def test_successful_call_returns_ai_result(mock_client_cls, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
     mock_client = Mock()
     mock_response = Mock()
-    mock_response.text = json.dumps({
-        "summary": "Results-driven backend engineer with 5 years of experience.",
-        "experience_bullets": ["Built and scaled REST APIs serving 1M+ requests/day."],
-        "skills_section": "Languages: Python, SQL",
-    })
+    mock_response.text = json.dumps(_resume_payload())
     mock_client.models.generate_content.return_value = mock_response
     mock_client_cls.return_value = mock_client
 
     result = generate_enhanced_resume("resume text", [], {})
     assert result["source"] == "ai"
     assert "backend engineer" in result["summary"]
+    assert result["experience"][0]["company"] == "Acme Corp"
 
 
 @patch("app.services.resume_builder.genai.Client")
@@ -145,6 +183,8 @@ def test_other_client_error_returns_fallback(mock_client_cls, monkeypatch):
     assert "The AI service returned an error" in result["overall_assessment"]
 
 
+# --- Chat -------------------------------------------------------------------------
+
 @patch("app.services.resume_builder.genai.Client")
 def test_chat_builds_from_scratch_with_no_resume_or_draft(mock_client_cls, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -153,9 +193,7 @@ def test_chat_builds_from_scratch_with_no_resume_or_draft(mock_client_cls, monke
     mock_response = Mock()
     mock_response.text = json.dumps({
         "reply": "Got it — I've drafted a summary based on what you told me.",
-        "summary": "Backend engineer with 3 years of Python experience.",
-        "experience_bullets": ["Built REST APIs at a fintech startup."],
-        "skills_section": "Python, PostgreSQL",
+        **_resume_payload(summary="Backend engineer with 3 years of Python experience."),
     })
     mock_client.models.generate_content.return_value = mock_response
     mock_client_cls.return_value = mock_client
@@ -164,46 +202,46 @@ def test_chat_builds_from_scratch_with_no_resume_or_draft(mock_client_cls, monke
         conversation=[{"role": "user", "content": "I'm a backend engineer with 3 years of Python experience at a fintech startup, build me a resume."}],
         resume_text="",
         missing_skills=[],
-        current_summary="",
-        current_experience_bullets=[],
-        current_skills_section="",
+        current_draft=_EMPTY_DRAFT,
     )
     assert result["source"] == "ai"
     assert result["summary"]
-    assert result["experience_bullets"]
+    assert result["experience"]
 
 
 def test_chat_no_api_key_returns_draft_unchanged(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
+    draft = _draft(
+        summary="Current summary.",
+        experience=[{"title": "", "company": "", "start_date": "", "end_date": "", "bullets": ["Bullet one.", "Bullet two."]}],
+        skills=["Python", "SQL"],
+    )
     result = chat_about_resume(
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
         resume_text="resume text",
         missing_skills=[],
-        current_summary="Current summary.",
-        current_experience_bullets=["Bullet one.", "Bullet two."],
-        current_skills_section="Python, SQL",
+        current_draft=draft,
     )
     assert result["source"] == "fallback"
     assert result["summary"] == "Current summary."
-    assert result["experience_bullets"] == ["Bullet one.", "Bullet two."]
-    assert result["skills_section"] == "Python, SQL"
+    assert result["experience"] == draft["experience"]
+    assert result["skills"] == ["Python", "SQL"]
 
 
 def test_chat_ai_disabled_returns_draft_unchanged(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    draft = _draft(summary="Current summary.", skills=["Python", "SQL"])
     result = chat_about_resume(
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
         resume_text="resume text",
         missing_skills=[],
-        current_summary="Current summary.",
-        current_experience_bullets=["Bullet one.", "Bullet two."],
-        current_skills_section="Python, SQL",
+        current_draft=draft,
         ai_enabled=False,
     )
     assert result["source"] == "fallback"
     assert "disabled by the administrator" in result["reply"]
-    assert result["experience_bullets"] == ["Bullet one.", "Bullet two."]
+    assert result["summary"] == "Current summary."
 
 
 @patch("app.services.resume_builder.genai.Client")
@@ -214,9 +252,10 @@ def test_chat_successful_call_returns_updated_draft(mock_client_cls, monkeypatch
     mock_response = Mock()
     mock_response.text = json.dumps({
         "reply": "Done — removed the second bullet.",
-        "summary": "Current summary.",
-        "experience_bullets": ["Bullet one."],
-        "skills_section": "Python, SQL",
+        **_resume_payload(experience=[{
+            "title": "Software Engineer", "company": "Acme Corp", "start_date": "2020", "end_date": "Present",
+            "bullets": ["Bullet one."],
+        }]),
     })
     mock_client.models.generate_content.return_value = mock_response
     mock_client_cls.return_value = mock_client
@@ -225,12 +264,10 @@ def test_chat_successful_call_returns_updated_draft(mock_client_cls, monkeypatch
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
         resume_text="resume text",
         missing_skills=[],
-        current_summary="Current summary.",
-        current_experience_bullets=["Bullet one.", "Bullet two."],
-        current_skills_section="Python, SQL",
+        current_draft=_draft(summary="Current summary.", skills=["Python", "SQL"]),
     )
     assert result["source"] == "ai"
-    assert result["experience_bullets"] == ["Bullet one."]
+    assert result["experience"][0]["bullets"] == ["Bullet one."]
     assert "removed" in result["reply"]
 
 
@@ -245,9 +282,7 @@ def test_chat_jd_content_included_in_system_prompt(mock_client_cls, monkeypatch)
     mock_response = Mock()
     mock_response.text = json.dumps({
         "reply": "Tailored your resume toward this role.",
-        "summary": "Backend engineer.",
-        "experience_bullets": [],
-        "skills_section": "Python",
+        **_resume_payload(experience=[], skills=["Python"]),
     })
     mock_client.models.generate_content.return_value = mock_response
     mock_client_cls.return_value = mock_client
@@ -256,9 +291,7 @@ def test_chat_jd_content_included_in_system_prompt(mock_client_cls, monkeypatch)
         conversation=[{"role": "user", "content": "Tailor my resume to this job."}],
         resume_text="resume text",
         missing_skills=[],
-        current_summary="",
-        current_experience_bullets=[],
-        current_skills_section="",
+        current_draft=_EMPTY_DRAFT,
         jd_content="We need a Backend Engineer skilled in Python, FastAPI, and PostgreSQL.",
     )
 
@@ -280,16 +313,15 @@ def test_chat_error_leaves_draft_unchanged(mock_client_cls, monkeypatch):
     )
     mock_client_cls.return_value = mock_client
 
+    draft = _draft(summary="Current summary.", skills=["Python", "SQL"])
     result = chat_about_resume(
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
         resume_text="resume text",
         missing_skills=[],
-        current_summary="Current summary.",
-        current_experience_bullets=["Bullet one.", "Bullet two."],
-        current_skills_section="Python, SQL",
+        current_draft=draft,
     )
     assert result["source"] == "fallback"
-    assert result["experience_bullets"] == ["Bullet one.", "Bullet two."]
+    assert result["skills"] == ["Python", "SQL"]
     assert "fast" in result["reply"]
 
 
@@ -307,18 +339,16 @@ def test_gemini_quota_error_falls_back_to_groq_for_generate(mock_gemini_client_c
     mock_gemini_client_cls.return_value = mock_gemini_client
 
     mock_groq_client = Mock()
-    mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
-        "summary": "Backend engineer with proven API experience.",
-        "experience_bullets": ["Built scalable REST APIs serving high traffic."],
-        "skills_section": "Languages: Python, SQL",
-    })
+    mock_groq_client.chat.completions.create.return_value = _mock_groq_response(
+        _resume_payload(summary="Backend engineer with proven API experience.")
+    )
     mock_groq_client_fn.return_value = mock_groq_client
 
     result = generate_enhanced_resume("resume text", ["Kubernetes"], {"original_skills": ["Python"]})
 
     assert result["source"] == "ai"
     assert "Backend engineer" in result["summary"]
-    assert result["experience_bullets"] == ["Built scalable REST APIs serving high traffic."]
+    assert result["experience"][0]["company"] == "Acme Corp"
 
     mock_groq_client.chat.completions.create.assert_called_once()
     call_kwargs = mock_groq_client.chat.completions.create.call_args.kwargs
@@ -341,9 +371,10 @@ def test_gemini_quota_error_falls_back_to_groq_for_chat(mock_gemini_client_cls, 
     mock_groq_client = Mock()
     mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
         "reply": "Done — removed the second bullet.",
-        "summary": "Current summary.",
-        "experience_bullets": ["Bullet one."],
-        "skills_section": "Python, SQL",
+        **_resume_payload(experience=[{
+            "title": "Software Engineer", "company": "Acme Corp", "start_date": "2020", "end_date": "Present",
+            "bullets": ["Bullet one."],
+        }]),
     })
     mock_groq_client_fn.return_value = mock_groq_client
 
@@ -351,13 +382,11 @@ def test_gemini_quota_error_falls_back_to_groq_for_chat(mock_gemini_client_cls, 
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
         resume_text="resume text",
         missing_skills=[],
-        current_summary="Current summary.",
-        current_experience_bullets=["Bullet one.", "Bullet two."],
-        current_skills_section="Python, SQL",
+        current_draft=_draft(summary="Current summary.", skills=["Python", "SQL"]),
     )
 
     assert result["source"] == "ai"
-    assert result["experience_bullets"] == ["Bullet one."]
+    assert result["experience"][0]["bullets"] == ["Bullet one."]
     assert "removed" in result["reply"]
     mock_groq_client.chat.completions.create.assert_called_once()
 
@@ -438,11 +467,7 @@ def test_second_gemini_key_used_when_first_hits_quota_for_generate(mock_client_c
 
     key2_client = Mock()
     key2_response = Mock()
-    key2_response.text = json.dumps({
-        "summary": "From the second key.",
-        "experience_bullets": ["Bullet."],
-        "skills_section": "Python",
-    })
+    key2_response.text = json.dumps(_resume_payload(summary="From the second key."))
     key2_client.models.generate_content.return_value = key2_response
 
     mock_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
@@ -469,11 +494,9 @@ def test_both_gemini_keys_quota_exhausted_falls_back_to_groq(mock_gemini_client_
     mock_gemini_client_cls.side_effect = _two_key_client_factory(key1_client, key2_client)
 
     mock_groq_client = Mock()
-    mock_groq_client.chat.completions.create.return_value = _mock_groq_response({
-        "summary": "From Groq after both Gemini keys were exhausted.",
-        "experience_bullets": ["Bullet."],
-        "skills_section": "Python",
-    })
+    mock_groq_client.chat.completions.create.return_value = _mock_groq_response(
+        _resume_payload(summary="From Groq after both Gemini keys were exhausted.")
+    )
     mock_groq_client_fn.return_value = mock_groq_client
 
     result = generate_enhanced_resume("resume text", [], {})
@@ -520,9 +543,10 @@ def test_second_gemini_key_used_when_first_hits_quota_for_chat(mock_client_cls, 
     key2_response = Mock()
     key2_response.text = json.dumps({
         "reply": "Done — from the second key.",
-        "summary": "Current summary.",
-        "experience_bullets": ["Bullet one."],
-        "skills_section": "Python, SQL",
+        **_resume_payload(experience=[{
+            "title": "Software Engineer", "company": "Acme Corp", "start_date": "2020", "end_date": "Present",
+            "bullets": ["Bullet one."],
+        }]),
     })
     key2_client.models.generate_content.return_value = key2_response
 
@@ -532,9 +556,7 @@ def test_second_gemini_key_used_when_first_hits_quota_for_chat(mock_client_cls, 
         conversation=[{"role": "user", "content": "Remove the second bullet."}],
         resume_text="resume text",
         missing_skills=[],
-        current_summary="Current summary.",
-        current_experience_bullets=["Bullet one.", "Bullet two."],
-        current_skills_section="Python, SQL",
+        current_draft=_draft(summary="Current summary.", skills=["Python", "SQL"]),
     )
 
     assert result["source"] == "ai"
