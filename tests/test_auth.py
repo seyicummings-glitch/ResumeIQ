@@ -16,6 +16,24 @@ def test_register_lowercases_stored_email(db_session):
     assert result.email == "test@example.com"
 
 
+def test_register_grants_free_signup_tokens(db_session):
+    from app.services.feature_gate import get_credit_balance
+
+    result = routes.register(UserCreate(email="new@example.com", password="Pass1234!", full_name="New User"), db_session)
+    assert get_credit_balance(db_session, result.id) == 100  # DEFAULT_FREE_SIGNUP_CREDITS
+
+
+def test_register_grants_admin_configured_signup_tokens(db_session):
+    from app.models.admin_models import AppSetting
+    from app.services.feature_gate import get_credit_balance
+
+    db_session.add(AppSetting(free_signup_credits=250))
+    db_session.commit()
+
+    result = routes.register(UserCreate(email="new2@example.com", password="Pass1234!", full_name="New User"), db_session)
+    assert get_credit_balance(db_session, result.id) == 250
+
+
 def test_register_rejects_case_variant_of_existing_email(db_session):
     routes.register(UserCreate(email="test@example.com", password="Pass1234!", full_name="First"), db_session)
 

@@ -15,13 +15,15 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import User
-from app.models.subscription_models import Plan, PlanLimit, Subscription, Transaction, CreditPackage, CreditLedgerEntry
+from app.models.subscription_models import Plan, Subscription, Transaction, CreditPackage, CreditLedgerEntry
 from app.security import get_current_user
 from app.services.pagination import paginate, page_response
 from app.services.subscription_limits import FEATURE_KEYS
 from app.services.subscription_admin import get_or_seed_payment_methods
 from app.services.payment_gateway import process_payment
-from app.services.feature_gate import get_or_create_subscription, get_feature_usage_summary, adjust_credits, get_credit_balance
+from app.services.feature_gate import (
+    get_or_create_subscription, get_feature_usage_summary, adjust_credits, get_credit_balance, next_free_refresh_at,
+)
 from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
@@ -36,11 +38,13 @@ def get_my_subscription(db: Session = Depends(get_db), current_user: User = Depe
         "plan": {
             "id": plan.id, "name": plan.name, "slug": plan.slug,
             "monthlyPriceCents": plan.monthly_price_cents, "yearlyPriceCents": plan.yearly_price_cents,
+            "monthlyCredits": plan.monthly_credits,
         } if plan else None,
         "status": subscription.status if subscription else None,
         "billingCycle": subscription.billing_cycle if subscription else None,
         "currentPeriodEnd": subscription.current_period_end if subscription else None,
         "creditBalance": get_credit_balance(db, current_user.id),
+        "nextFreeRefreshAt": next_free_refresh_at(db, current_user, subscription) if subscription else None,
         "usage": [get_feature_usage_summary(db, current_user, key) for key in FEATURE_KEYS],
     }
 
@@ -50,16 +54,14 @@ def list_public_plans(db: Session = Depends(get_db)):
     """No auth required — used for the "compare plans" / upgrade picker,
     which a logged-out visitor can reasonably browse too."""
     plans = db.query(Plan).filter(Plan.is_active.is_(True)).order_by(Plan.display_order, Plan.id).all()
-    result = []
-    for plan in plans:
-        limits = db.query(PlanLimit).filter(PlanLimit.plan_id == plan.id).all()
-        result.append({
+    return [
+        {
             "id": plan.id, "name": plan.name, "slug": plan.slug, "description": plan.description,
             "monthlyPriceCents": plan.monthly_price_cents, "yearlyPriceCents": plan.yearly_price_cents,
-            "currency": plan.currency,
-            "limits": [{"featureKey": l.feature_key, "dailyLimit": l.daily_limit, "monthlyLimit": l.monthly_limit} for l in limits],
-        })
-    return result
+            "monthlyCredits": plan.monthly_credits, "currency": plan.currency,
+        }
+        for plan in plans
+    ]
 
 
 @router.get("/payment-methods")
@@ -121,7 +123,21 @@ def upgrade_plan(
         ))
 
     db.commit()
-    return {"message": f"You're now on the {plan.name} plan.", "planId": plan.id, "billingCycle": data.billingCycle}
+
+    new_balance = get_credit_balance(db, current_user.id)
+    if plan.monthly_credits > 0:
+        new_balance = adjust_credits(
+            db, current_user.id, plan.monthly_credits, reason="subscription_grant",
+            reference_id=subscription.id,
+        )
+
+    return {
+        "message": f"You're now on the {plan.name} plan.",
+        "planId": plan.id,
+        "billingCycle": data.billingCycle,
+        "creditsGranted": plan.monthly_credits,
+        "creditBalance": new_balance,
+    }
 
 
 @router.get("/credit-packages")

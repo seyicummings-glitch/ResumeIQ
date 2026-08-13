@@ -15,6 +15,8 @@ from app.services.subscription_admin import (
     compute_revenue_by_feature_estimated,
     get_users_near_limit,
     compute_subscription_analytics,
+    compute_top_paying_users,
+    compute_total_revenue_cents,
 )
 
 NOW = datetime.now(timezone.utc)
@@ -168,9 +170,43 @@ def test_get_users_near_limit_excludes_users_below_threshold(db_session):
 
 # --- full analytics bundle -------------------------------------------------------
 
+def test_compute_top_paying_users_orders_by_lifetime_paid_desc(db_session):
+    big_spender = User(email="big@example.com", hashed_password="x", full_name="Big Spender")
+    small_spender = User(email="small@example.com", hashed_password="x", full_name="Small Spender")
+    db_session.add_all([big_spender, small_spender])
+    db_session.commit()
+
+    db_session.add_all([
+        Transaction(user_id=big_spender.id, kind="credit_purchase", amount_cents=5000, currency="usd", status="paid"),
+        Transaction(user_id=big_spender.id, kind="subscription", amount_cents=3999, currency="usd", status="paid"),
+        Transaction(user_id=small_spender.id, kind="credit_purchase", amount_cents=999, currency="usd", status="paid"),
+        Transaction(user_id=small_spender.id, kind="credit_purchase", amount_cents=500, currency="usd", status="failed"),
+    ])
+    db_session.commit()
+
+    result = compute_top_paying_users(db_session)
+    assert result[0]["userId"] == big_spender.id
+    assert result[0]["totalPaidCents"] == 8999
+    assert result[1]["userId"] == small_spender.id
+    assert result[1]["totalPaidCents"] == 999  # the failed transaction isn't counted
+
+
+def test_compute_total_revenue_cents_only_counts_paid(db_session):
+    user = User(email="user@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.add_all([
+        Transaction(user_id=user.id, kind="subscription", amount_cents=3999, currency="usd", status="paid"),
+        Transaction(user_id=user.id, kind="credit_purchase", amount_cents=999, currency="usd", status="failed"),
+    ])
+    db_session.commit()
+
+    assert compute_total_revenue_cents(db_session) == 3999
+
+
 def test_compute_subscription_analytics_returns_all_expected_keys(db_session):
     result = compute_subscription_analytics(db_session)
     assert set(result.keys()) == {
-        "totalCreditsPurchased", "creditsConsumed", "mostUsedFeatures",
-        "revenueByPlan", "revenueByFeatureEstimated", "activeSubscribers", "usersNearLimit",
+        "totalCreditsPurchased", "creditsConsumed", "totalRevenueCents", "mostUsedFeatures",
+        "revenueByPlan", "revenueByFeatureEstimated", "activeSubscribers", "usersNearLimit", "topPayingUsers",
     }

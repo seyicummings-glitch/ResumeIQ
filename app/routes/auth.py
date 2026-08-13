@@ -28,6 +28,7 @@ from app.security import (
 )
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_AUTH
 from app.services.email_service import is_email_configured, send_password_reset_email
+from app.services.feature_gate import grant_signup_credits
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -54,6 +55,10 @@ def register(user: UserCreate, db: Session = Depends(get_db), request: Request =
         db.rollback()
         raise HTTPException(status_code=400, detail="Email already registered")
     db.refresh(new_user)
+
+    # Every new account starts with the admin-configured free token balance — see
+    # app/services/feature_gate.py's docstring for the full token-economy model.
+    grant_signup_credits(db, new_user)
 
     track_event(db, EVENT_TYPES["USER_REGISTERED"], FEATURE_AUTH, user_id=new_user.id, request=request)
     return new_user

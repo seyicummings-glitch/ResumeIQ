@@ -1,7 +1,7 @@
 import pytest
 
 from app.models.models import User
-from app.models.subscription_models import Plan, PlanLimit, Subscription, Transaction, CreditPackage, CreditLedgerEntry
+from app.models.subscription_models import Plan, Subscription, Transaction, CreditPackage, CreditLedgerEntry
 from app.routes import subscriptions as routes
 
 
@@ -55,16 +55,23 @@ def test_get_my_subscription_reflects_credit_balance(db_session):
 
 # --- GET /subscriptions/plans ------------------------------------------------------
 
-def test_list_public_plans_only_returns_active_plans_with_limits(db_session):
-    active = _premium_plan(db_session)
-    db_session.add(PlanLimit(plan_id=active.id, feature_key="ai_resume_builder", monthly_limit=20))
+def test_list_public_plans_only_returns_active_plans(db_session):
+    _premium_plan(db_session)
     db_session.add(Plan(name="Retired", slug="retired", monthly_price_cents=999, is_active=False))
     db_session.commit()
 
     result = routes.list_public_plans(db_session)
     assert len(result) == 1
     assert result[0]["slug"] == "premium"
-    assert result[0]["limits"][0] == {"featureKey": "ai_resume_builder", "dailyLimit": None, "monthlyLimit": 20}
+
+
+def test_list_public_plans_includes_monthly_credits(db_session):
+    plan = Plan(name="Pro", slug="pro", monthly_price_cents=3999, monthly_credits=5000, is_active=True)
+    db_session.add(plan)
+    db_session.commit()
+
+    result = routes.list_public_plans(db_session)
+    assert result[0]["monthlyCredits"] == 5000
 
 
 # --- payment methods ----------------------------------------------------------------
@@ -104,6 +111,23 @@ def test_upgrade_plan_succeeds_and_records_transaction(db_session):
     assert transaction.status == "paid"
     assert transaction.amount_cents == 1999
     assert transaction.kind == "subscription"
+
+
+def test_upgrade_plan_grants_the_plans_monthly_credits(db_session):
+    _free_plan(db_session)
+    pro = Plan(name="Pro", slug="pro", monthly_price_cents=3999, monthly_credits=5000, is_active=True)
+    db_session.add(pro)
+    db_session.commit()
+    user = _user(db_session)
+
+    result = routes.upgrade_plan(
+        routes.UpgradeInput(planId=pro.id, billingCycle="monthly", paymentMethod="credit_card"), db_session, user,
+    )
+    assert result["creditsGranted"] == 5000
+    assert result["creditBalance"] == 5000
+
+    from app.services.feature_gate import get_credit_balance
+    assert get_credit_balance(db_session, user.id) == 5000
 
 
 def test_upgrade_plan_to_free_skips_payment_gateway(db_session):

@@ -67,6 +67,11 @@ STATEMENTS = [
     "ALTER TABLE ai_conversations DROP CONSTRAINT IF EXISTS uq_ai_conversation_user_kind",
     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS title VARCHAR",
     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    # AI token economy — shared token balance (was: per-plan daily/monthly usage counters only).
+    "ALTER TABLE plans ADD COLUMN IF NOT EXISTS monthly_credits INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE credit_balances ADD COLUMN IF NOT EXISTS last_free_refresh_at TIMESTAMPTZ",
+    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_signup_credits INTEGER NOT NULL DEFAULT 100",
+    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_credit_refresh_hours INTEGER NOT NULL DEFAULT 720",
 ]
 
 

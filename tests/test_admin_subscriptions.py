@@ -37,6 +37,32 @@ def test_create_plan_persists_and_serializes(db_session):
     assert db_session.query(Plan).filter(Plan.slug == "basic").count() == 1
 
 
+def test_create_plan_persists_monthly_credits(db_session):
+    admin = _admin(db_session)
+    data = routes.PlanCreateInput(name="Pro", slug="pro", monthlyPriceCents=3999, monthlyCredits=5000)
+    result = routes.create_plan(data, db_session, admin)
+    assert result["monthlyCredits"] == 5000
+
+
+def test_update_plan_changes_monthly_credits(db_session):
+    admin = _admin(db_session)
+    plan = Plan(name="Pro", slug="pro", monthly_price_cents=3999, monthly_credits=1000)
+    db_session.add(plan)
+    db_session.commit()
+    db_session.refresh(plan)
+
+    result = routes.update_plan(plan.id, routes.PlanUpdateInput(monthlyCredits=5000), db_session, admin)
+    assert result["monthlyCredits"] == 5000
+
+
+def test_create_plan_rejects_negative_monthly_credits(db_session):
+    admin = _admin(db_session)
+    data = routes.PlanCreateInput(name="Pro", slug="pro", monthlyPriceCents=3999, monthlyCredits=-10)
+    with pytest.raises(Exception) as exc_info:
+        routes.create_plan(data, db_session, admin)
+    assert exc_info.value.status_code == 400
+
+
 def test_create_plan_rejects_duplicate_slug(db_session):
     admin = _admin(db_session)
     db_session.add(Plan(name="Basic", slug="basic", monthly_price_cents=999))

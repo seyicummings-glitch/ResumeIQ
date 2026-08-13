@@ -15,6 +15,11 @@ class Plan(Base):
     currency = Column(String, nullable=False, default="usd")
     is_active = Column(Boolean, nullable=False, default=True)
     display_order = Column(Integer, nullable=False, default=0)
+    # Tokens granted into the subscriber's balance when they (re-)subscribe to this plan — see
+    # app/services/feature_gate.py's check_and_consume(). 0 for the Free plan, which instead
+    # relies on the signup grant + periodic free refresh (AppSetting.free_signup_credits /
+    # free_credit_refresh_hours).
+    monthly_credits = Column(Integer, nullable=False, default=0)
     stripe_product_id = Column(String, nullable=True)
     stripe_monthly_price_id = Column(String, nullable=True)
     stripe_yearly_price_id = Column(String, nullable=True)
@@ -127,6 +132,10 @@ class CreditBalance(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
     balance = Column(Integer, nullable=False, default=0)
+    # Last time the free-plan periodic token refresh was applied (see
+    # feature_gate._maybe_refresh_free_credits) — None means never, which is treated as due
+    # immediately the next time it's checked.
+    last_free_refresh_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

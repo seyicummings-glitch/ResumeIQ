@@ -43,6 +43,8 @@ def _serialize_settings(row: AppSetting) -> dict:
         "allowedFileTypes": row.allowed_file_types.split(",") if row.allowed_file_types else [],
         "rateLimitPerMinute": row.rate_limit_per_minute,
         "supportEmail": row.support_email,
+        "freeSignupCredits": row.free_signup_credits,
+        "freeCreditRefreshHours": row.free_credit_refresh_hours,
     }
 
 
@@ -217,6 +219,8 @@ class SettingsUpdateInput(BaseModel):
     allowedFileTypes: list[str] | None = None
     rateLimitPerMinute: int | None = None
     supportEmail: str | None = None
+    freeSignupCredits: int | None = None
+    freeCreditRefreshHours: int | None = None
 
 
 @router.put("/settings")
@@ -240,9 +244,19 @@ def update_settings(
             row.rate_limit_per_minute = data.rateLimitPerMinute
         if data.supportEmail is not None:
             row.support_email = data.supportEmail
+        if data.freeSignupCredits is not None:
+            if data.freeSignupCredits < 0:
+                raise HTTPException(status_code=400, detail="Free signup tokens can't be negative.")
+            row.free_signup_credits = data.freeSignupCredits
+        if data.freeCreditRefreshHours is not None:
+            if data.freeCreditRefreshHours <= 0:
+                raise HTTPException(status_code=400, detail="Free token refresh interval must be positive.")
+            row.free_credit_refresh_hours = data.freeCreditRefreshHours
 
         db.commit()
         db.refresh(row)
         return _serialize_settings(row)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating settings: {str(e)}")

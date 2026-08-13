@@ -28,6 +28,7 @@ def _serialize_plan(plan: Plan) -> dict:
         "description": plan.description,
         "monthlyPriceCents": plan.monthly_price_cents,
         "yearlyPriceCents": plan.yearly_price_cents,
+        "monthlyCredits": plan.monthly_credits,
         "currency": plan.currency,
         "isActive": plan.is_active,
         "displayOrder": plan.display_order,
@@ -69,6 +70,7 @@ class PlanCreateInput(BaseModel):
     description: str | None = None
     monthlyPriceCents: int
     yearlyPriceCents: int | None = None
+    monthlyCredits: int = 0
     currency: str = "usd"
     displayOrder: int = 0
 
@@ -78,6 +80,8 @@ def create_plan(data: PlanCreateInput, db: Session = Depends(get_db), current_us
     existing = db.query(Plan).filter(Plan.slug == data.slug).first()
     if existing:
         raise HTTPException(status_code=400, detail="A plan with that slug already exists.")
+    if data.monthlyCredits < 0:
+        raise HTTPException(status_code=400, detail="Included tokens can't be negative.")
 
     plan = Plan(
         name=data.name,
@@ -85,6 +89,7 @@ def create_plan(data: PlanCreateInput, db: Session = Depends(get_db), current_us
         description=data.description,
         monthly_price_cents=data.monthlyPriceCents,
         yearly_price_cents=data.yearlyPriceCents,
+        monthly_credits=data.monthlyCredits,
         currency=data.currency,
         display_order=data.displayOrder,
     )
@@ -104,6 +109,7 @@ class PlanUpdateInput(BaseModel):
     description: str | None = None
     monthlyPriceCents: int | None = None
     yearlyPriceCents: int | None = None
+    monthlyCredits: int | None = None
     currency: str | None = None
     displayOrder: int | None = None
 
@@ -129,6 +135,10 @@ def update_plan(
         plan.monthly_price_cents = data.monthlyPriceCents
     if data.yearlyPriceCents is not None:
         plan.yearly_price_cents = data.yearlyPriceCents
+    if data.monthlyCredits is not None:
+        if data.monthlyCredits < 0:
+            raise HTTPException(status_code=400, detail="Included tokens can't be negative.")
+        plan.monthly_credits = data.monthlyCredits
     if data.currency is not None:
         plan.currency = data.currency
     if data.displayOrder is not None:

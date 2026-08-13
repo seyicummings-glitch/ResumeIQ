@@ -149,6 +149,24 @@ def compute_revenue_by_feature_estimated(db: Session, top_n: int = 10) -> list[d
     return estimated[:top_n]
 
 
+def compute_top_paying_users(db: Session, top_n: int = 10) -> list[dict]:
+    """Lifetime paid amount per user, across both subscription charges and credit-package
+    purchases — the "Top Paying Users" admin view."""
+    rows = (
+        db.query(User.id, User.full_name, User.email, func.coalesce(func.sum(Transaction.amount_cents), 0))
+        .join(Transaction, Transaction.user_id == User.id)
+        .filter(Transaction.status == "paid")
+        .group_by(User.id, User.full_name, User.email)
+        .order_by(func.coalesce(func.sum(Transaction.amount_cents), 0).desc())
+        .limit(top_n)
+        .all()
+    )
+    return [
+        {"userId": uid, "userName": name or email, "userEmail": email, "totalPaidCents": int(total)}
+        for uid, name, email, total in rows
+    ]
+
+
 def get_users_near_limit(db: Session, threshold: float = NEAR_LIMIT_THRESHOLD, limit: int = 20) -> list[dict]:
     """Flags (user, feature) pairs where the user is close to their plan's
     monthly allowance for the current period — a natural upsell moment.
@@ -197,13 +215,23 @@ def get_users_near_limit(db: Session, threshold: float = NEAR_LIMIT_THRESHOLD, l
     return results[:limit]
 
 
+def compute_total_revenue_cents(db: Session) -> int:
+    return (
+        db.query(func.coalesce(func.sum(Transaction.amount_cents), 0))
+        .filter(Transaction.status == "paid")
+        .scalar() or 0
+    )
+
+
 def compute_subscription_analytics(db: Session) -> dict:
     credit_totals = compute_credit_totals(db)
     return {
         **credit_totals,
+        "totalRevenueCents": compute_total_revenue_cents(db),
         "mostUsedFeatures": compute_most_used_features(db),
         "revenueByPlan": compute_revenue_by_plan(db),
         "revenueByFeatureEstimated": compute_revenue_by_feature_estimated(db),
         "activeSubscribers": count_paid_active_subscribers(db),
         "usersNearLimit": get_users_near_limit(db),
+        "topPayingUsers": compute_top_paying_users(db),
     }

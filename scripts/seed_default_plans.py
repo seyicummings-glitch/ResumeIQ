@@ -24,6 +24,9 @@ PLANS = [
         "description": "Get started with the essentials.",
         "monthly_price_cents": 0,
         "yearly_price_cents": 0,
+        # The Free plan doesn't use monthly_credits -- it runs on the signup grant + periodic
+        # refresh instead (Admin Settings > free_signup_credits / free_credit_refresh_hours).
+        "monthly_credits": 0,
         "display_order": 0,
         "limits": {
             "resume_analysis": (1, 5),
@@ -42,6 +45,7 @@ PLANS = [
         "description": "For active job seekers who want more room to practice.",
         "monthly_price_cents": 999,
         "yearly_price_cents": 9999,
+        "monthly_credits": 1000,
         "display_order": 1,
         "limits": {
             "resume_analysis": (5, 50),
@@ -60,6 +64,7 @@ PLANS = [
         "description": "Full-speed job search with generous AI usage.",
         "monthly_price_cents": 1999,
         "yearly_price_cents": 19999,
+        "monthly_credits": 5000,
         "display_order": 2,
         "limits": {
             "resume_analysis": (15, 200),
@@ -78,6 +83,7 @@ PLANS = [
         "description": "Unlimited usage for teams and organizations.",
         "monthly_price_cents": 4999,
         "yearly_price_cents": 49999,
+        "monthly_credits": 20000,
         "display_order": 3,
         "limits": {
             "resume_analysis": (None, None),
@@ -108,6 +114,7 @@ def run_seed():
                 description=plan_data["description"],
                 monthly_price_cents=plan_data["monthly_price_cents"],
                 yearly_price_cents=plan_data["yearly_price_cents"],
+                monthly_credits=plan_data["monthly_credits"],
                 display_order=plan_data["display_order"],
             )
             sync_plan_to_stripe(plan)
