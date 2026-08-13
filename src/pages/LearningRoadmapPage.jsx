@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useLearningRoadmap, useToggleRoadmapTopic, useRegenerateRoadmap } from '../hooks/useLearningRoadmap'
+import { trackRoadmapResourceClick } from '../api/roadmap'
 import { useCareerCoachContext } from '../coach/CareerCoachContext'
 import Card from '../components/ui/Card'
 import Button, { buttonClasses } from '../components/ui/Button'
@@ -148,6 +149,7 @@ function VideoResourceCard({ links, skillTitle }) {
       href={links.youtubeUrl}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={() => trackRoadmapResourceClick({ resourceType: 'video', skillTitle, url: links.youtubeUrl })}
       className="group flex w-full flex-col overflow-hidden rounded-lg border border-border bg-surface transition-colors hover:border-accent sm:w-56"
     >
       {links.youtubeThumbnailUrl ? (
@@ -194,13 +196,14 @@ function VideoResourceCard({ links, skillTitle }) {
   )
 }
 
-function CourseResourceCard({ links }) {
+function CourseResourceCard({ links, skillTitle }) {
   if (!links.courseUrl) return null
   return (
     <a
       href={links.courseUrl}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={() => trackRoadmapResourceClick({ resourceType: 'course', skillTitle, url: links.courseUrl })}
       className="flex w-full flex-col gap-2 rounded-lg border border-border bg-surface p-2.5 transition-colors hover:border-accent sm:w-56"
     >
       <div className="flex items-start gap-2">
@@ -228,12 +231,13 @@ function RecommendedResourceLinks({ links, skillTitle }) {
   return (
     <div className="flex flex-wrap items-stretch gap-2" onClick={(event) => event.stopPropagation()}>
       <VideoResourceCard links={links} skillTitle={skillTitle} />
-      <CourseResourceCard links={links} />
+      <CourseResourceCard links={links} skillTitle={skillTitle} />
       {links.docsUrl && (
         <a
           href={links.docsUrl}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => trackRoadmapResourceClick({ resourceType: 'docs', skillTitle, url: links.docsUrl })}
           className="inline-flex h-fit items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-h transition-colors hover:border-accent hover:text-accent"
         >
           <FileText size={12} aria-hidden="true" />
@@ -263,7 +267,11 @@ function TopicRow({ topic, onToggle, isToggling, onAskCoach }) {
         <div className="flex-1">
           <button
             type="button"
-            onClick={() => setExpanded((value) => !value)}
+            onClick={() => {
+              const nextExpanded = !expanded
+              setExpanded(nextExpanded)
+              if (nextExpanded) trackRoadmapResourceClick({ resourceType: 'skill', skillTitle: topic.title })
+            }}
             aria-expanded={expanded}
             className="flex w-full items-center justify-between gap-3 text-left"
           >

@@ -4,27 +4,102 @@ import Badge from '../../components/ui/Badge'
 import Spinner from '../../components/ui/Spinner'
 import ErrorState from '../../components/ui/ErrorState'
 import TrendLineChart from '../../components/charts/TrendLineChart'
+import MultiSeriesTrendChart from '../../components/charts/MultiSeriesTrendChart'
+import ActivityFeed from '../../components/admin/ActivityFeed'
 
-const KPI_LABELS = {
-  totalUsers: 'Total users',
-  activeUsersToday: 'Active users today',
-  newUsersThisMonth: 'New users this month',
-  totalResumesUploaded: 'Resumes uploaded',
-  totalAnalyses: 'Resume analyses',
-  totalAiResumeBuilds: 'AI resume builds',
-  totalSkillAssessments: 'Skill assessments',
-  totalInterviewSessions: 'Interview sessions',
-  totalRoadmapsGenerated: 'Learning roadmaps',
-  totalDocumentsGenerated: 'Documents generated',
-  aiRequestsToday: 'AI requests today',
-  averageMatchScore: 'Average match score',
+// Real-time updates: this page polls (see useAdminDashboard/useAdminActivityFeed's
+// refetchInterval) rather than using a WebSocket. A resume-tooling admin dashboard
+// doesn't need sub-second updates, and polling keeps the whole stack on the same
+// HTTP+TanStack-Query architecture already used everywhere else in this app instead
+// of introducing a second, stateful transport just for this one page.
+
+const SECTIONS = [
+  {
+    title: 'Users',
+    key: 'userAnalytics',
+    tiles: [
+      { key: 'totalUsers', label: 'Total users' },
+      { key: 'activeUsers', label: 'Active users (30d)' },
+      { key: 'newUsersToday', label: 'New users today' },
+      { key: 'newUsersThisMonth', label: 'New users this month' },
+    ],
+  },
+  {
+    title: 'Resume Analytics',
+    key: 'resumeAnalytics',
+    tiles: [
+      { key: 'totalUploads', label: 'Resume uploads' },
+      { key: 'totalAnalyses', label: 'Resume analyses' },
+      { key: 'totalAtsReports', label: 'ATS reports' },
+      { key: 'totalDownloads', label: 'Resume downloads' },
+    ],
+  },
+  {
+    title: 'AI Builder Analytics',
+    key: 'aiBuilderAnalytics',
+    tiles: [
+      { key: 'totalBuilds', label: 'AI resume builds' },
+      { key: 'totalSaves', label: 'AI resume saves' },
+      { key: 'totalDownloads', label: 'AI resume downloads' },
+      { key: 'totalRegenerations', label: 'AI regenerations' },
+    ],
+  },
+  {
+    title: 'Interview Analytics',
+    key: 'interviewAnalytics',
+    tiles: [
+      { key: 'totalInterviews', label: 'Total interviews' },
+      { key: 'voiceInterviews', label: 'Voice interviews' },
+      { key: 'textInterviews', label: 'Text interviews' },
+      { key: 'completedInterviews', label: 'Completed interviews' },
+    ],
+  },
+  {
+    title: 'Learning Analytics',
+    key: 'learningAnalytics',
+    tiles: [{ key: 'roadmapsGenerated', label: 'Roadmaps generated' }],
+  },
+  {
+    title: 'Revenue Analytics',
+    key: 'revenueAnalytics',
+    tiles: [
+      { key: 'activeSubscribers', label: 'Active subscribers' },
+      { key: 'monthlyRevenue', label: 'Monthly revenue', currency: true },
+      { key: 'annualRevenue', label: 'Annual revenue', currency: true },
+      { key: 'failedPayments', label: 'Failed payments' },
+    ],
+  },
+]
+
+function KpiTile({ label, value, currency }) {
+  return (
+    <Card className="!p-3">
+      <p className="text-xs text-text">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-text-h">
+        {value === null || value === undefined ? '—' : currency ? `$${value.toLocaleString()}` : value.toLocaleString()}
+      </p>
+    </Card>
+  )
 }
 
-const CHARTS = [
-  { key: 'userGrowth', title: 'User growth', yKey: 'count', label: 'New users' },
-  { key: 'resumeUploadActivity', title: 'Resume upload activity', yKey: 'count', label: 'Resumes uploaded', color: 'var(--color-accent-2)' },
-  { key: 'analysisActivity', title: 'Analysis activity', yKey: 'count', label: 'Analyses', color: 'var(--color-success)' },
-  { key: 'interviewActivity', title: 'Interview activity', yKey: 'count', label: 'Interview sessions', color: 'var(--color-warning)' },
+function TopValuesCard({ title, entries, emptyLabel, tone = 'accent' }) {
+  return (
+    <Card>
+      <h2 className="mb-3 text-base font-semibold text-text-h">{title}</h2>
+      <div className="flex flex-wrap gap-2">
+        {entries.length === 0 && <p className="text-sm text-text">{emptyLabel}</p>}
+        {entries.map((entry) => (
+          <Badge key={entry.value} tone={tone}>
+            {entry.value} · {entry.count}
+          </Badge>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+const LEGACY_CHARTS = [
+  { key: 'userGrowth', title: 'User growth (daily, 30d)', yKey: 'count', label: 'New users' },
   { key: 'skillAssessmentActivity', title: 'Skill assessment activity', yKey: 'count', label: 'Assessments taken' },
 ]
 
@@ -43,56 +118,92 @@ export default function AdminDashboardPage() {
     return <ErrorState message={error.message} onRetry={refetch} />
   }
 
-  const { kpis, charts } = data
+  const { charts } = data
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-        {Object.entries(KPI_LABELS).map(([key, label]) => (
-          <Card key={key} className="!p-3">
-            <p className="text-xs text-text">{label}</p>
-            <p className="mt-1 text-lg font-semibold text-text-h">
-              {kpis[key] === null || kpis[key] === undefined
-                ? '—'
-                : key === 'averageMatchScore'
-                  ? `${kpis[key]}%`
-                  : kpis[key]}
-            </p>
-          </Card>
-        ))}
-      </div>
+      {SECTIONS.map((section) => (
+        <div key={section.key}>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text/70">{section.title}</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {section.tiles.map((tile) => (
+              <KpiTile key={tile.key} label={tile.label} value={data[section.key][tile.key]} currency={tile.currency} />
+            ))}
+          </div>
+        </div>
+      ))}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {CHARTS.map(({ key, title, yKey, label, color }) => (
+        <Card>
+          <h2 className="mb-2 text-base font-semibold text-text-h">User growth</h2>
+          <MultiSeriesTrendChart
+            data={charts.userGrowthDaily}
+            xKey="date"
+            series={[{ key: 'count', label: 'New users (daily)', color: 'var(--color-accent)' }]}
+          />
+        </Card>
+
+        <Card>
+          <h2 className="mb-2 text-base font-semibold text-text-h">Platform usage — most used features</h2>
+          <div className="flex flex-wrap gap-2">
+            {charts.platformUsage.length === 0 && <p className="text-sm text-text">No activity recorded yet.</p>}
+            {charts.platformUsage.map((entry) => (
+              <Badge key={entry.feature} tone="accent">
+                {entry.feature.replace(/_/g, ' ')} · {entry.count}
+              </Badge>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <h2 className="mb-2 text-base font-semibold text-text-h">Resume analytics — uploads, analyses, downloads</h2>
+          <MultiSeriesTrendChart
+            data={charts.resumeActivity}
+            xKey="date"
+            series={[
+              { key: 'uploads', label: 'Uploads', color: 'var(--color-accent)' },
+              { key: 'analyses', label: 'Analyses', color: 'var(--color-success)' },
+              { key: 'downloads', label: 'Downloads', color: 'var(--color-warning)' },
+            ]}
+          />
+        </Card>
+
+        <Card>
+          <h2 className="mb-2 text-base font-semibold text-text-h">Interview analytics — started vs. completed</h2>
+          <MultiSeriesTrendChart
+            data={charts.interviewStartedVsCompleted}
+            xKey="date"
+            series={[
+              { key: 'started', label: 'Started', color: 'var(--color-accent-2)' },
+              { key: 'completed', label: 'Completed', color: 'var(--color-success)' },
+            ]}
+          />
+        </Card>
+
+        <TopValuesCard title="Learning analytics — top skills viewed" entries={charts.topSkillsViewed} emptyLabel="No skills viewed yet." tone="accent" />
+
+        <Card>
+          <h2 className="mb-2 text-base font-semibold text-text-h">Subscription analytics — revenue trend</h2>
+          <MultiSeriesTrendChart
+            data={charts.revenueTrend}
+            xKey="date"
+            series={[{ key: 'revenue', label: 'Revenue ($)', color: 'var(--color-success)' }]}
+          />
+        </Card>
+
+        {LEGACY_CHARTS.map(({ key, title, yKey, label }) => (
           <Card key={key}>
             <h2 className="mb-2 text-base font-semibold text-text-h">{title}</h2>
-            <TrendLineChart data={charts[key]} xKey="date" yKey={yKey} label={label} color={color} />
+            <TrendLineChart data={charts[key]} xKey="date" yKey={yKey} label={label} />
           </Card>
         ))}
 
-        <Card>
-          <h2 className="mb-3 text-base font-semibold text-text-h">Most requested job roles</h2>
-          <div className="flex flex-wrap gap-2">
-            {charts.mostRequestedJobRoles.length === 0 && <p className="text-sm text-text">No job descriptions saved yet.</p>}
-            {charts.mostRequestedJobRoles.map((entry) => (
-              <Badge key={entry.role} tone="accent">
-                {entry.role} · {entry.count}
-              </Badge>
-            ))}
-          </div>
-        </Card>
+        <TopValuesCard title="Learning analytics — most opened courses" entries={data.learningAnalytics.mostOpenedCourses} emptyLabel="No courses opened yet." tone="success" />
+        <TopValuesCard title="Learning analytics — most opened YouTube resources" entries={data.learningAnalytics.mostOpenedYoutubeResources} emptyLabel="No video resources opened yet." tone="warning" />
+        <TopValuesCard title="Most requested job roles" entries={charts.mostRequestedJobRoles.map((r) => ({ value: r.role, count: r.count }))} emptyLabel="No job descriptions saved yet." tone="accent" />
+        <TopValuesCard title="Most common missing skills" entries={charts.mostCommonMissingSkills.map((r) => ({ value: r.skill, count: r.count }))} emptyLabel="No analyses yet." tone="danger" />
 
-        <Card>
-          <h2 className="mb-3 text-base font-semibold text-text-h">Most common missing skills</h2>
-          <div className="flex flex-wrap gap-2">
-            {charts.mostCommonMissingSkills.length === 0 && <p className="text-sm text-text">No analyses yet.</p>}
-            {charts.mostCommonMissingSkills.map((entry) => (
-              <Badge key={entry.skill} tone="danger">
-                {entry.skill} · {entry.count}
-              </Badge>
-            ))}
-          </div>
-        </Card>
+        <ActivityFeed />
       </div>
     </div>
   )

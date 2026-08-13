@@ -40,14 +40,14 @@ export function getInterviewQuestions() {
  * preferredLanguage (the browser's locale, e.g. navigator.language) seeds the
  * language of the interviewer's opening message; it then follows whatever
  * language the candidate actually writes in.
- * @param {{conversation: ChatMessage[], preferredLanguage: string | undefined}} params
+ * @param {{conversation: ChatMessage[], preferredLanguage: string | undefined, mode: 'voice' | 'text' | undefined}} params
  * @returns {Promise<InterviewChatReply>}
  */
-export function sendInterviewMessage({ conversation, preferredLanguage }) {
+export function sendInterviewMessage({ conversation, preferredLanguage, mode }) {
   return apiRequest('/interview/chat', {
     method: 'POST',
     auth: true,
-    body: { conversation, preferred_language: preferredLanguage },
+    body: { conversation, preferred_language: preferredLanguage, mode },
   })
 }
 
@@ -74,16 +74,17 @@ export function sendInterviewMessage({ conversation, preferredLanguage }) {
 /**
  * Persists a completed interview session — the full transcript and the recorded audio, if the
  * browser supported capturing it — and returns the AI-generated post-interview feedback report.
- * @param {{transcript: ChatMessage[], audioBlob: Blob | null}} params
+ * @param {{transcript: ChatMessage[], audioBlob: Blob | null, mode: 'voice' | 'text' | undefined}} params
  * @returns {Promise<SaveInterviewSessionResult>}
  */
-export async function saveInterviewSession({ transcript, audioBlob }) {
+export async function saveInterviewSession({ transcript, audioBlob, mode }) {
   const formData = new FormData()
   formData.append('transcript', JSON.stringify(transcript))
   if (audioBlob) {
     const extension = audioBlob.type.includes('mp4') ? 'mp4' : 'webm'
     formData.append('audio', audioBlob, `interview-recording.${extension}`)
   }
+  if (mode) formData.append('mode', mode)
 
   const row = await apiRequest('/interview/sessions', { method: 'POST', auth: true, body: formData })
   return { id: row.id, feedback: row.feedback, hasAudio: row.has_audio }

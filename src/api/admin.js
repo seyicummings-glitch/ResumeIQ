@@ -4,6 +4,10 @@ export async function getDashboard() {
   return apiRequest('/admin/dashboard', { auth: true })
 }
 
+export async function getActivityFeed(limit = 20) {
+  return apiRequest('/admin/dashboard/activity-feed', { auth: true, query: { limit } })
+}
+
 export async function getUsersPage({ page = 1, pageSize = 20, search, status, role } = {}) {
   return apiRequest('/admin/users', { auth: true, query: { page, pageSize, search, status, role } })
 }

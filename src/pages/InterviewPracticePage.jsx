@@ -192,6 +192,7 @@ export default function InterviewPracticePage() {
       const result = await saveSession.mutateAsync({
         transcript: finalMessages.map(({ role, content }) => ({ role, content })),
         audioBlob: null,
+        mode,
       })
       setSessionResult(result)
     } catch (err) {
@@ -212,7 +213,7 @@ export default function InterviewPracticePage() {
     voice.stopSpeaking()
 
     try {
-      const result = await chat.mutateAsync({ conversation: [], preferredLanguage: navigator.language })
+      const result = await chat.mutateAsync({ conversation: [], preferredLanguage: navigator.language, mode })
       const spoken = result.feedback ? `${result.feedback} ${result.question}` : result.question
       const initialMessages = [{ role: 'interviewer', content: spoken }]
       setMessages(initialMessages)

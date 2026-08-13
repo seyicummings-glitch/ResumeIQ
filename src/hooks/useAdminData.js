@@ -1,8 +1,25 @@
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import * as adminApi from '../api/admin'
 
+// 20s: real-time-enough for an admin dashboard without hammering the backend --
+// see the "Real-Time Updates" requirement (polling, not WebSockets, per the
+// architecture note in AdminDashboardPage.jsx).
+const DASHBOARD_POLL_INTERVAL_MS = 20_000
+
 export function useAdminDashboard() {
-  return useQuery({ queryKey: ['admin', 'dashboard'], queryFn: adminApi.getDashboard })
+  return useQuery({
+    queryKey: ['admin', 'dashboard'],
+    queryFn: adminApi.getDashboard,
+    refetchInterval: DASHBOARD_POLL_INTERVAL_MS,
+  })
+}
+
+export function useAdminActivityFeed(limit = 20) {
+  return useQuery({
+    queryKey: ['admin', 'activityFeed', limit],
+    queryFn: () => adminApi.getActivityFeed(limit),
+    refetchInterval: DASHBOARD_POLL_INTERVAL_MS,
+  })
 }
 
 export function useAdminUsersPage(params) {

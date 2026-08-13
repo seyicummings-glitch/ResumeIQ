@@ -76,3 +76,18 @@ export function toggleRoadmapTopic({ topicKey }) {
   return apiRequest('/roadmap/topics/toggle', { method: 'POST', auth: true, body: { topic_key: topicKey } })
 }
 
+/**
+ * Fire-and-forget analytics beacon for the Admin Dashboard's "most viewed skills /
+ * most opened courses / most opened YouTube resources" — called when a user opens a
+ * resource link or expands a topic, never awaited by the caller (a tracking failure
+ * must never block or visibly affect the actual navigation/expand action).
+ * @param {{resourceType: 'video'|'course'|'docs'|'skill', skillTitle: string, url?: string}} params
+ */
+export function trackRoadmapResourceClick({ resourceType, skillTitle, url }) {
+  return apiRequest('/roadmap/track-resource-click', {
+    method: 'POST',
+    auth: true,
+    body: { resource_type: resourceType, skill_title: skillTitle, url },
+  }).catch(() => {})
+}
+
