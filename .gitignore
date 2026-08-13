@@ -1,4 +1,4 @@
-# Python
+# Python (backend)
 __pycache__/
 *.py[cod]
 *$py.class
@@ -7,10 +7,15 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Virtual environments
+# Python virtual environments
 venv/
 .venv/
 env/
+
+# Node (frontend)
+node_modules/
+dist/
+dist-ssr/
 
 # Environment variables
 .env
@@ -19,9 +24,18 @@ env/
 
 # Logs
 *.log
+logs/
+npm-debug.log*
 
 # Database backups (contain user data — never commit)
 backups/
+
+# Caches
+.eslintcache
+.vite/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+coverage/
 
 # OS files
 .DS_Store
