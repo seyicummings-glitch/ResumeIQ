@@ -1,7 +1,7 @@
 """
 Multimodal file attachment analysis for the AI Resume Builder — lets a user drop an image,
-screenshot, PDF, or document straight into the conversation the way they would with ChatGPT,
-Claude, or Gemini. Runs once per attachment (not resent on every later turn): Gemini reads the
+screenshot, PDF, or document straight into the conversation the way they would with a modern
+AI assistant. Runs once per attachment (not resent on every later turn): Gemini reads the
 file directly — genuine vision for images and native PDF understanding, not just OCR — and
 produces a rich text description, which is then folded into the conversation like anything else
 the user said. That keeps the rest of the chat architecture (full text history resent each

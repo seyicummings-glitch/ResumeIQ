@@ -1,5 +1,6 @@
-# -ResumeIQ
-AI Resume Analyzer
+# ResumeIQ
+
+AI Resume Analyzer — FastAPI backend
 
 ## Deployment / HTTPS
 

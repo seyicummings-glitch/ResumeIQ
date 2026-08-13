@@ -55,12 +55,6 @@ STATEMENTS = [
     "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS youtube_duration VARCHAR",
     "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS course_title VARCHAR",
     "ALTER TABLE skill_resources ADD COLUMN IF NOT EXISTS course_provider VARCHAR",
-    # Cleanup — drop the unused bring-your-own Claude/Anthropic API key column.
-    # Claude/Anthropic support was fully removed from this app; Gemini (with
-    # a single server-wide key) is the sole AI provider, so a per-user
-    # Claude key was never read or written by any route and was just sitting
-    # on the table unused.
-    "ALTER TABLE users DROP COLUMN IF EXISTS claude_api_key",
     # Subscription & credit management — transactions now cover both plan
     # charges and credit-package purchases (see app/models/subscription_models.py)
     "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS kind VARCHAR NOT NULL DEFAULT 'subscription'",

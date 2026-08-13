@@ -332,7 +332,7 @@ def _build_chat_system_prompt(
 
     return (
         "You are an expert, proactive AI resume-building assistant and career coach — the kind of "
-        "conversational assistant users expect from ChatGPT, Claude, Gemini, or Grok, not a rigid form "
+        "conversational assistant users expect from a modern AI chat assistant, not a rigid form "
         "that only executes literal commands. You're having an ongoing conversation with the user to help "
         "them build a new resume or improve an existing one.\n\n"
         f"{grounding}\n\n"
