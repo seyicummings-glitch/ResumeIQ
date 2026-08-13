@@ -144,7 +144,6 @@ export default function ResumeDocument({ draft }) {
 
       {draft.summary && (
         <section>
-          <Heading>Professional Summary</Heading>
           <p className="text-[13px] leading-relaxed text-gray-800">{draft.summary}</p>
         </section>
       )}
