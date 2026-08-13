@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Send, Paperclip, ImagePlus, FileUp, X, Sparkles, FileText, Link2 } from 'lucide-react'
+import { Send, Paperclip, ImagePlus, FileUp, X, Sparkles, FileText, Link2, Download } from 'lucide-react'
 import clsx from 'clsx'
 import { useResumes } from '../hooks/useResumes'
 import * as resumeApi from '../api/resume'
 import * as jdApi from '../api/jobDescription'
 import { useChatAboutResume, useUploadResumeForChat, useSaveEnhancedResume } from '../hooks/useResumeBuilder'
 import { useResumeBuilderDraft } from '../resume/ResumeBuilderDraftContext'
+import ResumeDocument, { RESUME_TEMPLATES, hasResumeContent } from '../resume/templates/ResumeDocument'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
+
+const EMPTY_DRAFT = {
+  title: '', summary: '', skills: { technical: [], soft: [] }, experience: [], education: [],
+  certifications: [], projects: [], languages: [], references: [],
+}
 
 const URL_PATTERN = /https?:\/\/[^\s]+/i
 
@@ -96,31 +102,54 @@ function TypingBubble() {
   )
 }
 
-/** Joins non-empty parts with a separator — used for the contact line and job date ranges,
- * where any field (phone, LinkedIn, location, an end date…) might be blank. */
-function joinTruthy(parts, sep) {
-  return parts.filter(Boolean).join(sep)
+function TemplatePicker({ template, onChange }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {RESUME_TEMPLATES.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          onClick={() => onChange(option.id)}
+          title={option.description}
+          className={clsx(
+            'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+            template === option.id
+              ? 'border-accent bg-accent text-accent-contrast'
+              : 'border-border bg-surface text-text hover:text-text-h'
+          )}
+        >
+          {option.name}
+        </button>
+      ))}
+    </div>
+  )
 }
 
-function DraftPreview({ draft, sourceLabel, onSave, isSaving, isSaved }) {
-  const hasContent =
-    draft &&
-    (draft.summary ||
-      draft.skills?.length > 0 ||
-      draft.experience?.length > 0 ||
-      draft.education?.length > 0 ||
-      draft.certifications?.length > 0)
-
-  const contact = draft?.contact
-  const contactLine = contact && joinTruthy([contact.email, contact.phone, contact.linkedin, contact.location], '  •  ')
+function DraftPreview({ draft, sourceLabel, template, onTemplateChange, onSave, isSaving, isSaved }) {
+  const hasContent = hasResumeContent(draft)
 
   return (
     <Card className="flex h-full flex-col gap-0 p-0">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3.5">
-        <h2 className="text-sm font-semibold text-text-h">Your resume draft</h2>
-        {sourceLabel && (
-          <Badge tone={sourceLabel === 'AI-generated' ? 'accent' : 'neutral'}>{sourceLabel}</Badge>
-        )}
+      <div className="flex flex-col gap-2 border-b border-border px-4 py-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-text-h">Your resume draft</h2>
+          <div className="flex items-center gap-2">
+            {sourceLabel && (
+              <Badge tone={sourceLabel === 'AI-generated' ? 'accent' : 'neutral'}>{sourceLabel}</Badge>
+            )}
+            {hasContent && (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                title="Download as PDF (uses your browser's print dialog — choose 'Save as PDF')"
+                className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-text hover:text-text-h"
+              >
+                <Download size={12} aria-hidden="true" /> Download PDF
+              </button>
+            )}
+          </div>
+        </div>
+        {hasContent && <TemplatePicker template={template} onChange={onTemplateChange} />}
       </div>
 
       {!hasContent ? (
@@ -131,89 +160,10 @@ function DraftPreview({ draft, sourceLabel, onSave, isSaving, isSaved }) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
-          {(contact?.fullName || draft.title || contactLine) && (
-            <div className="flex flex-col items-center gap-0.5 text-center">
-              {contact?.fullName && <p className="text-base font-bold tracking-wide text-text-h">{contact.fullName}</p>}
-              {draft.title && <p className="text-sm font-medium text-accent">{draft.title}</p>}
-              {contactLine && <p className="text-xs text-text/70">{contactLine}</p>}
-            </div>
-          )}
-
-          {draft.summary && (
-            <section>
-              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
-                Professional Summary
-              </p>
-              <p className="text-sm leading-relaxed text-text-h">{draft.summary}</p>
-            </section>
-          )}
-
-          {draft.skills?.length > 0 && (
-            <section>
-              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
-                Core Skills
-              </p>
-              <p className="text-sm text-text-h">{draft.skills.join('  •  ')}</p>
-            </section>
-          )}
-
-          {draft.experience?.length > 0 && (
-            <section>
-              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
-                Professional Experience
-              </p>
-              <div className="flex flex-col gap-3.5">
-                {draft.experience.map((job, index) => (
-                  <div key={index}>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <p className="text-sm font-semibold text-text-h">
-                        {joinTruthy([job.title, job.company], ' | ') || '(untitled role)'}
-                      </p>
-                      {(job.startDate || job.endDate) && (
-                        <p className="shrink-0 text-xs text-text/60">{joinTruthy([job.startDate, job.endDate], ' – ')}</p>
-                      )}
-                    </div>
-                    {job.bullets?.length > 0 && (
-                      <ul className="mt-1 flex flex-col gap-1 text-sm text-text-h">
-                        {job.bullets.map((bullet, bulletIndex) => (
-                          <li key={bulletIndex} className="pl-3.5 -indent-3.5">• {bullet}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {draft.education?.length > 0 && (
-            <section>
-              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
-                Education
-              </p>
-              <div className="flex flex-col gap-1">
-                {draft.education.map((edu, index) => (
-                  <p key={index} className="text-sm text-text-h">
-                    {joinTruthy([joinTruthy([edu.degree, edu.school], ', '), edu.date && `(${edu.date})`], ' ')}
-                  </p>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {draft.certifications?.length > 0 && (
-            <section>
-              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
-                Certifications
-              </p>
-              <ul className="flex flex-col gap-1 text-sm text-text-h">
-                {draft.certifications.map((cert, index) => (
-                  <li key={index} className="pl-3.5 -indent-3.5">• {cert}</li>
-                ))}
-              </ul>
-            </section>
-          )}
+        <div className="flex-1 overflow-y-auto bg-border/20 p-4">
+          <div id="resume-print-area" className="mx-auto max-w-[38rem] overflow-hidden rounded-md shadow-sm">
+            <ResumeDocument draft={draft} template={template} />
+          </div>
         </div>
       )}
 
@@ -246,6 +196,9 @@ export default function ResumeBuilderPage() {
   const [jdExtracting, setJdExtracting] = useState(false)
   const [pendingAttachment, setPendingAttachment] = useState(null)
   const [attachmentLoading, setAttachmentLoading] = useState(false)
+  // Purely a preview/print choice — switches instantly since it only changes how the same
+  // draft data is rendered, never re-sent to the AI or re-generated.
+  const [template, setTemplate] = useState('professional')
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
   const attachmentInputRef = useRef(null)
@@ -272,10 +225,13 @@ export default function ResumeBuilderPage() {
         currentDraft: {
           title: draft?.title || '',
           summary: draft?.summary || '',
-          skills: draft?.skills || [],
+          skills: draft?.skills || EMPTY_DRAFT.skills,
           experience: draft?.experience || [],
           education: draft?.education || [],
           certifications: draft?.certifications || [],
+          projects: draft?.projects || [],
+          languages: draft?.languages || [],
+          references: draft?.references || [],
         },
         jdContent: jdContentOverride ?? jdContent,
         attachment,
@@ -289,6 +245,9 @@ export default function ResumeBuilderPage() {
           experience: result.experience,
           education: result.education,
           certifications: result.certifications,
+          projects: result.projects,
+          languages: result.languages,
+          references: result.references,
           contact: result.contact,
         },
       })
@@ -398,6 +357,9 @@ export default function ResumeBuilderPage() {
         experience: draft.experience,
         education: draft.education,
         certifications: draft.certifications,
+        projects: draft.projects,
+        languages: draft.languages,
+        references: draft.references,
       },
       {
         onSuccess: (result) => {
@@ -545,6 +507,8 @@ export default function ResumeBuilderPage() {
           <DraftPreview
             draft={draft}
             sourceLabel={sourceLabel}
+            template={template}
+            onTemplateChange={setTemplate}
             onSave={handleSave}
             isSaving={saveMutation.isPending}
             isSaved={saveMutation.isSuccess}

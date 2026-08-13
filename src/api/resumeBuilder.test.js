@@ -10,8 +10,17 @@ beforeEach(() => {
   apiRequest.mockReset()
 })
 
-const RAW_CONTACT = { full_name: 'Jordan Mitchell', email: 'jordan@example.com', phone: '555-1234', linkedin: 'in/jordan', location: 'Austin, TX' }
-const CONTACT = { fullName: 'Jordan Mitchell', email: 'jordan@example.com', phone: '555-1234', linkedin: 'in/jordan', location: 'Austin, TX' }
+const RAW_CONTACT = {
+  full_name: 'Jordan Mitchell', email: 'jordan@example.com', phone: '555-1234',
+  linkedin: 'in/jordan', location: 'Austin, TX', portfolio: 'jordanmitchell.dev',
+}
+const CONTACT = {
+  fullName: 'Jordan Mitchell', email: 'jordan@example.com', phone: '555-1234',
+  linkedin: 'in/jordan', location: 'Austin, TX', portfolio: 'jordanmitchell.dev',
+}
+
+const RAW_SKILLS = { technical: ['SEO', 'CRM'], soft: ['Negotiation'] }
+const SKILLS = { technical: ['SEO', 'CRM'], soft: ['Negotiation'] }
 
 const RAW_EXPERIENCE = [{ title: 'Marketing Manager', company: 'Acme Co.', start_date: 'Mar 2022', end_date: 'Present', bullets: ['Did a thing.'] }]
 const EXPERIENCE = [{ title: 'Marketing Manager', company: 'Acme Co.', startDate: 'Mar 2022', endDate: 'Present', bullets: ['Did a thing.'] }]
@@ -19,15 +28,24 @@ const EXPERIENCE = [{ title: 'Marketing Manager', company: 'Acme Co.', startDate
 const RAW_EDUCATION = [{ degree: 'BBA, Marketing', school: 'UT Austin', date: 'May 2017' }]
 const EDUCATION = [{ degree: 'BBA, Marketing', school: 'UT Austin', date: 'May 2017' }]
 
+const RAW_PROJECTS = [{ name: 'Brand Relaunch', description: 'Led a relaunch.', technologies: ['HubSpot'], bullets: ['Increased traffic by 60%.'] }]
+const PROJECTS = [{ name: 'Brand Relaunch', description: 'Led a relaunch.', technologies: ['HubSpot'], bullets: ['Increased traffic by 60%.'] }]
+
+const RAW_LANGUAGES = [{ name: 'Spanish', proficiency: 'Fluent' }]
+const LANGUAGES = [{ name: 'Spanish', proficiency: 'Fluent' }]
+
 describe('generateEnhancedResume', () => {
   it('calls POST /resume-builder/generate and maps snake_case to camelCase', async () => {
     apiRequest.mockResolvedValue({
       title: 'Marketing Professional',
       summary: 'A summary.',
-      skills: ['SEO', 'CRM'],
+      skills: RAW_SKILLS,
       experience: RAW_EXPERIENCE,
       education: RAW_EDUCATION,
       certifications: ['HubSpot Certified'],
+      projects: RAW_PROJECTS,
+      languages: RAW_LANGUAGES,
+      references: [],
       contact: RAW_CONTACT,
       source: 'ai',
       overall_assessment: undefined,
@@ -40,10 +58,13 @@ describe('generateEnhancedResume', () => {
     expect(result).toEqual({
       title: 'Marketing Professional',
       summary: 'A summary.',
-      skills: ['SEO', 'CRM'],
+      skills: SKILLS,
       experience: EXPERIENCE,
       education: EDUCATION,
       certifications: ['HubSpot Certified'],
+      projects: PROJECTS,
+      languages: LANGUAGES,
+      references: [],
       contact: CONTACT,
       source: 'ai',
       overallAssessment: undefined,
@@ -58,10 +79,13 @@ describe('chatAboutResume', () => {
       reply: 'Done.',
       title: 'Marketing Professional',
       summary: 'Updated summary.',
-      skills: ['Go', 'Rust'],
+      skills: { technical: ['Go', 'Rust'], soft: [] },
       experience: RAW_EXPERIENCE,
       education: RAW_EDUCATION,
       certifications: [],
+      projects: [],
+      languages: [],
+      references: [],
       contact: RAW_CONTACT,
       source: 'ai',
     })
@@ -71,10 +95,13 @@ describe('chatAboutResume', () => {
       currentDraft: {
         title: 'Old title',
         summary: 'Old summary.',
-        skills: ['Go'],
+        skills: { technical: ['Go'], soft: [] },
         experience: EXPERIENCE,
         education: EDUCATION,
         certifications: [],
+        projects: [],
+        languages: [],
+        references: [],
       },
     })
 
@@ -85,10 +112,13 @@ describe('chatAboutResume', () => {
         conversation: [{ role: 'user', content: 'Remove the second bullet.' }],
         current_title: 'Old title',
         current_summary: 'Old summary.',
-        current_skills: ['Go'],
+        current_skills: { technical: ['Go'], soft: [] },
         current_experience: RAW_EXPERIENCE,
         current_education: RAW_EDUCATION,
         current_certifications: [],
+        current_projects: [],
+        current_languages: [],
+        current_references: [],
         jd_content: '',
         attachment: null,
       },
@@ -97,10 +127,13 @@ describe('chatAboutResume', () => {
       reply: 'Done.',
       title: 'Marketing Professional',
       summary: 'Updated summary.',
-      skills: ['Go', 'Rust'],
+      skills: { technical: ['Go', 'Rust'], soft: [] },
       experience: EXPERIENCE,
       education: EDUCATION,
       certifications: [],
+      projects: [],
+      languages: [],
+      references: [],
       contact: CONTACT,
       source: 'ai',
     })
@@ -111,17 +144,20 @@ describe('chatAboutResume', () => {
       reply: 'Tailored to the job.',
       title: '',
       summary: 'Updated summary.',
-      skills: ['Python'],
+      skills: { technical: ['Python'], soft: [] },
       experience: [],
       education: [],
       certifications: [],
+      projects: [],
+      languages: [],
+      references: [],
       contact: RAW_CONTACT,
       source: 'ai',
     })
 
     await chatAboutResume({
       conversation: [{ role: 'user', content: 'Tailor my resume to this job.' }],
-      currentDraft: { title: '', summary: '', skills: [], experience: [], education: [], certifications: [] },
+      currentDraft: { title: '', summary: '', skills: { technical: [], soft: [] }, experience: [], education: [], certifications: [], projects: [], languages: [], references: [] },
       jdContent: 'We need a Backend Engineer skilled in Python.',
     })
 
@@ -134,17 +170,20 @@ describe('chatAboutResume', () => {
       reply: "That's a screenshot of a job posting.",
       title: '',
       summary: '',
-      skills: [],
+      skills: { technical: [], soft: [] },
       experience: [],
       education: [],
       certifications: [],
+      projects: [],
+      languages: [],
+      references: [],
       contact: RAW_CONTACT,
       source: 'ai',
     })
 
     await chatAboutResume({
       conversation: [{ role: 'user', content: 'what does this say?' }],
-      currentDraft: { title: '', summary: '', skills: [], experience: [], education: [], certifications: [] },
+      currentDraft: { title: '', summary: '', skills: { technical: [], soft: [] }, experience: [], education: [], certifications: [], projects: [], languages: [], references: [] },
       attachment: { filename: 'job-posting.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=' },
     })
 
@@ -165,10 +204,13 @@ describe('saveEnhancedResume', () => {
       resumeId: 3,
       title: 'Marketing Professional',
       summary: 'Summary.',
-      skills: ['Python'],
+      skills: SKILLS,
       experience: EXPERIENCE,
       education: EDUCATION,
       certifications: ['HubSpot Certified'],
+      projects: PROJECTS,
+      languages: LANGUAGES,
+      references: [],
     })
 
     expect(apiRequest).toHaveBeenCalledWith('/resume-builder/save', {
@@ -178,10 +220,13 @@ describe('saveEnhancedResume', () => {
         resume_id: 3,
         title: 'Marketing Professional',
         summary: 'Summary.',
-        skills: ['Python'],
+        skills: RAW_SKILLS,
         experience: RAW_EXPERIENCE,
         education: RAW_EDUCATION,
         certifications: ['HubSpot Certified'],
+        projects: RAW_PROJECTS,
+        languages: RAW_LANGUAGES,
+        references: [],
       },
     })
     expect(result).toEqual({ message: 'Saved.', resumeId: 3, version: 2, label: 'v2 (AI-enhanced)' })
@@ -194,10 +239,13 @@ describe('saveEnhancedResume', () => {
       resumeId: undefined,
       title: '',
       summary: 'Summary.',
-      skills: [],
+      skills: { technical: [], soft: [] },
       experience: [],
       education: [],
       certifications: [],
+      projects: [],
+      languages: [],
+      references: [],
     })
 
     const [, options] = apiRequest.mock.calls[0]

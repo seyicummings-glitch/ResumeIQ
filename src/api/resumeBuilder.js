@@ -7,26 +7,44 @@ import { apiRequest } from './client'
  * @property {string} phone
  * @property {string} linkedin
  * @property {string} location
+ * @property {string} portfolio
  *
  * @typedef {Object} ExperienceItem
  * @property {string} title
  * @property {string} company
  * @property {string} startDate
  * @property {string} endDate
- * @property {string[]} bullets
+ * @property {string[]} bullets - achievement-focused, quantified accomplishments
  *
  * @typedef {Object} EducationItem
  * @property {string} degree
  * @property {string} school
  * @property {string} date
  *
+ * @typedef {Object} Skills
+ * @property {string[]} technical - hard skills, tools, technologies, domain competencies
+ * @property {string[]} soft - interpersonal/workplace skills
+ *
+ * @typedef {Object} ProjectItem
+ * @property {string} name
+ * @property {string} description
+ * @property {string[]} technologies
+ * @property {string[]} bullets - results achieved
+ *
+ * @typedef {Object} LanguageItem
+ * @property {string} name
+ * @property {string} proficiency
+ *
  * @typedef {Object} EnhancedResumeResult
  * @property {string} title
  * @property {string} summary
- * @property {string[]} skills
+ * @property {Skills} skills
  * @property {ExperienceItem[]} experience
  * @property {EducationItem[]} education
  * @property {string[]} certifications
+ * @property {ProjectItem[]} projects
+ * @property {LanguageItem[]} languages
+ * @property {string[]} references
  * @property {ContactInfo} contact - real profile contact info, never AI-generated
  * @property {'ai'|'fallback'} source
  * @property {string|undefined} overallAssessment - present on fallback responses
@@ -40,6 +58,7 @@ function toContact(row) {
     phone: row?.phone || '',
     linkedin: row?.linkedin || '',
     location: row?.location || '',
+    portfolio: row?.portfolio || '',
   }
 }
 
@@ -55,14 +74,32 @@ function toEducation(rows) {
   return (rows || []).map((edu) => ({ degree: edu.degree || '', school: edu.school || '', date: edu.date || '' }))
 }
 
+function toSkills(row) {
+  return { technical: row?.technical || [], soft: row?.soft || [] }
+}
+
+function toProjects(rows) {
+  return (rows || []).map((project) => ({
+    name: project.name || '', description: project.description || '',
+    technologies: project.technologies || [], bullets: project.bullets || [],
+  }))
+}
+
+function toLanguages(rows) {
+  return (rows || []).map((lang) => ({ name: lang.name || '', proficiency: lang.proficiency || '' }))
+}
+
 function toEnhancedResumeResult(row) {
   return {
     title: row.title || '',
     summary: row.summary,
-    skills: row.skills || [],
+    skills: toSkills(row.skills),
     experience: toExperience(row.experience),
     education: toEducation(row.education),
     certifications: row.certifications || [],
+    projects: toProjects(row.projects),
+    languages: toLanguages(row.languages),
+    references: row.references || [],
     contact: toContact(row.contact),
     source: row.source,
     overallAssessment: row.overall_assessment,
@@ -85,10 +122,13 @@ export async function generateEnhancedResume() {
  * @property {string} reply
  * @property {string} title
  * @property {string} summary
- * @property {string[]} skills
+ * @property {Skills} skills
  * @property {ExperienceItem[]} experience
  * @property {EducationItem[]} education
  * @property {string[]} certifications
+ * @property {ProjectItem[]} projects
+ * @property {LanguageItem[]} languages
+ * @property {string[]} references
  * @property {ContactInfo} contact
  * @property {'ai'|'fallback'} source
  */
@@ -105,7 +145,7 @@ export async function generateEnhancedResume() {
  * @property {string} mimeType
  * @property {string} dataBase64
  *
- * @param {{conversation:BuilderChatMessage[], currentDraft: {title:string, summary:string, skills:string[], experience:ExperienceItem[], education:EducationItem[], certifications:string[]}, jdContent?:string, attachment?:BuilderChatAttachment|null}} params
+ * @param {{conversation:BuilderChatMessage[], currentDraft: {title:string, summary:string, skills:Skills, experience:ExperienceItem[], education:EducationItem[], certifications:string[], projects:ProjectItem[], languages:LanguageItem[], references:string[]}, jdContent?:string, attachment?:BuilderChatAttachment|null}} params
  * @returns {Promise<BuilderChatReply>}
  */
 export async function chatAboutResume({ conversation, currentDraft, jdContent, attachment }) {
@@ -116,12 +156,20 @@ export async function chatAboutResume({ conversation, currentDraft, jdContent, a
       conversation,
       current_title: currentDraft.title || '',
       current_summary: currentDraft.summary || '',
-      current_skills: currentDraft.skills || [],
+      current_skills: {
+        technical: currentDraft.skills?.technical || [],
+        soft: currentDraft.skills?.soft || [],
+      },
       current_experience: (currentDraft.experience || []).map((job) => ({
         title: job.title, company: job.company, start_date: job.startDate, end_date: job.endDate, bullets: job.bullets,
       })),
       current_education: (currentDraft.education || []).map((edu) => ({ degree: edu.degree, school: edu.school, date: edu.date })),
       current_certifications: currentDraft.certifications || [],
+      current_projects: (currentDraft.projects || []).map((project) => ({
+        name: project.name, description: project.description, technologies: project.technologies, bullets: project.bullets,
+      })),
+      current_languages: (currentDraft.languages || []).map((lang) => ({ name: lang.name, proficiency: lang.proficiency })),
+      current_references: currentDraft.references || [],
       jd_content: jdContent || '',
       attachment: attachment
         ? { filename: attachment.filename, mime_type: attachment.mimeType, data_base64: attachment.dataBase64 }
@@ -132,10 +180,13 @@ export async function chatAboutResume({ conversation, currentDraft, jdContent, a
     reply: row.reply,
     title: row.title || '',
     summary: row.summary,
-    skills: row.skills || [],
+    skills: toSkills(row.skills),
     experience: toExperience(row.experience),
     education: toEducation(row.education),
     certifications: row.certifications || [],
+    projects: toProjects(row.projects),
+    languages: toLanguages(row.languages),
+    references: row.references || [],
     contact: toContact(row.contact),
     source: row.source,
   }
@@ -146,7 +197,9 @@ export async function chatAboutResume({ conversation, currentDraft, jdContent, a
  * draft was built entirely from scratch through conversation with no prior uploaded resume.
  * @returns {Promise<{message:string, resumeId:number, version:number, label:string}>}
  */
-export async function saveEnhancedResume({ resumeId, title, summary, skills, experience, education, certifications }) {
+export async function saveEnhancedResume({
+  resumeId, title, summary, skills, experience, education, certifications, projects, languages, references,
+}) {
   const row = await apiRequest('/resume-builder/save', {
     method: 'POST',
     auth: true,
@@ -154,12 +207,17 @@ export async function saveEnhancedResume({ resumeId, title, summary, skills, exp
       resume_id: resumeId ?? undefined,
       title: title || '',
       summary,
-      skills: skills || [],
+      skills: { technical: skills?.technical || [], soft: skills?.soft || [] },
       experience: (experience || []).map((job) => ({
         title: job.title, company: job.company, start_date: job.startDate, end_date: job.endDate, bullets: job.bullets,
       })),
       education: (education || []).map((edu) => ({ degree: edu.degree, school: edu.school, date: edu.date })),
       certifications: certifications || [],
+      projects: (projects || []).map((project) => ({
+        name: project.name, description: project.description, technologies: project.technologies, bullets: project.bullets,
+      })),
+      languages: (languages || []).map((lang) => ({ name: lang.name, proficiency: lang.proficiency })),
+      references: references || [],
     },
   })
   return {
