@@ -73,7 +73,7 @@ const SECTIONS = [
 
 function KpiTile({ label, value, currency }) {
   return (
-    <Card className="!p-2 w-32 shrink-0">
+    <Card className="!p-2">
       <p className="truncate text-[11px] leading-tight text-text">{label}</p>
       <p className="mt-0.5 text-sm font-semibold text-text-h">
         {value === null || value === undefined ? '—' : currency ? `$${value.toLocaleString()}` : value.toLocaleString()}
@@ -126,7 +126,7 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
         {allTiles.map((tile) => (
           <KpiTile key={tile.id} label={tile.label} value={tile.value} currency={tile.currency} />
         ))}
