@@ -73,7 +73,7 @@ const SECTIONS = [
 
 function KpiTile({ label, value, currency }) {
   return (
-    <Card className="!p-2">
+    <Card className="!p-2 w-32 shrink-0">
       <p className="truncate text-[11px] leading-tight text-text">{label}</p>
       <p className="mt-0.5 text-sm font-semibold text-text-h">
         {value === null || value === undefined ? '—' : currency ? `$${value.toLocaleString()}` : value.toLocaleString()}
@@ -120,18 +120,17 @@ export default function AdminDashboardPage() {
 
   const { charts } = data
 
+  const allTiles = SECTIONS.flatMap((section) =>
+    section.tiles.map((tile) => ({ ...tile, id: `${section.key}.${tile.key}`, value: data[section.key][tile.key] }))
+  )
+
   return (
     <div className="flex flex-col gap-4">
-      {SECTIONS.map((section) => (
-        <div key={section.key}>
-          <h2 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text/70">{section.title}</h2>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
-            {section.tiles.map((tile) => (
-              <KpiTile key={tile.key} label={tile.label} value={data[section.key][tile.key]} currency={tile.currency} />
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {allTiles.map((tile) => (
+          <KpiTile key={tile.id} label={tile.label} value={tile.value} currency={tile.currency} />
+        ))}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
