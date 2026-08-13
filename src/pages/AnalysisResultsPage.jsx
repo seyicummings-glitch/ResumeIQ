@@ -499,12 +499,21 @@ function BulletRewritesTab({ resumeId }) {
           <Badge tone={generateMutation.data.source === 'ai' ? 'accent' : 'neutral'}>
             {generateMutation.data.source === 'ai' ? 'AI-generated' : 'Rule-based fallback'}
           </Badge>
-          <Card className="p-4">
-            <ul className="flex flex-col gap-2 text-sm text-text-h">
-              {generateMutation.data.experienceBullets.map((bullet, index) => (
-                <li key={index}>• {bullet}</li>
-              ))}
-            </ul>
+          <Card className="flex flex-col gap-4 p-4">
+            {generateMutation.data.experience.map((job, index) => (
+              <div key={index}>
+                {(job.title || job.company) && (
+                  <p className="mb-1 text-sm font-semibold text-text-h">
+                    {[job.title, job.company].filter(Boolean).join(' | ')}
+                  </p>
+                )}
+                <ul className="flex flex-col gap-2 text-sm text-text-h">
+                  {job.bullets.map((bullet, bulletIndex) => (
+                    <li key={bulletIndex}>• {bullet}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </Card>
           <Link to="/resume-builder" className="w-fit text-sm font-medium text-accent hover:underline">
             Open in AI Resume Builder to edit and save →

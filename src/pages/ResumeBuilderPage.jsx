@@ -96,8 +96,23 @@ function TypingBubble() {
   )
 }
 
+/** Joins non-empty parts with a separator — used for the contact line and job date ranges,
+ * where any field (phone, LinkedIn, location, an end date…) might be blank. */
+function joinTruthy(parts, sep) {
+  return parts.filter(Boolean).join(sep)
+}
+
 function DraftPreview({ draft, sourceLabel, onSave, isSaving, isSaved }) {
-  const hasContent = draft && (draft.summary || draft.experienceBullets.length > 0 || draft.skillsSection)
+  const hasContent =
+    draft &&
+    (draft.summary ||
+      draft.skills?.length > 0 ||
+      draft.experience?.length > 0 ||
+      draft.education?.length > 0 ||
+      draft.certifications?.length > 0)
+
+  const contact = draft?.contact
+  const contactLine = contact && joinTruthy([contact.email, contact.phone, contact.linkedin, contact.location], '  •  ')
 
   return (
     <Card className="flex h-full flex-col gap-0 p-0">
@@ -116,27 +131,89 @@ function DraftPreview({ draft, sourceLabel, onSave, isSaving, isSaved }) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text/70">Summary</p>
-            <p className="text-sm text-text-h">{draft.summary || '(not written yet)'}</p>
-          </div>
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text/70">Experience</p>
-            {draft.experienceBullets.length > 0 ? (
-              <ul className="flex flex-col gap-1.5 text-sm text-text-h">
-                {draft.experienceBullets.map((bullet, index) => (
-                  <li key={index}>• {bullet}</li>
+        <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
+          {(contact?.fullName || draft.title || contactLine) && (
+            <div className="flex flex-col items-center gap-0.5 text-center">
+              {contact?.fullName && <p className="text-base font-bold tracking-wide text-text-h">{contact.fullName}</p>}
+              {draft.title && <p className="text-sm font-medium text-accent">{draft.title}</p>}
+              {contactLine && <p className="text-xs text-text/70">{contactLine}</p>}
+            </div>
+          )}
+
+          {draft.summary && (
+            <section>
+              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
+                Professional Summary
+              </p>
+              <p className="text-sm leading-relaxed text-text-h">{draft.summary}</p>
+            </section>
+          )}
+
+          {draft.skills?.length > 0 && (
+            <section>
+              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
+                Core Skills
+              </p>
+              <p className="text-sm text-text-h">{draft.skills.join('  •  ')}</p>
+            </section>
+          )}
+
+          {draft.experience?.length > 0 && (
+            <section>
+              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
+                Professional Experience
+              </p>
+              <div className="flex flex-col gap-3.5">
+                {draft.experience.map((job, index) => (
+                  <div key={index}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="text-sm font-semibold text-text-h">
+                        {joinTruthy([job.title, job.company], ' | ') || '(untitled role)'}
+                      </p>
+                      {(job.startDate || job.endDate) && (
+                        <p className="shrink-0 text-xs text-text/60">{joinTruthy([job.startDate, job.endDate], ' – ')}</p>
+                      )}
+                    </div>
+                    {job.bullets?.length > 0 && (
+                      <ul className="mt-1 flex flex-col gap-1 text-sm text-text-h">
+                        {job.bullets.map((bullet, bulletIndex) => (
+                          <li key={bulletIndex} className="pl-3.5 -indent-3.5">• {bullet}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {draft.education?.length > 0 && (
+            <section>
+              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
+                Education
+              </p>
+              <div className="flex flex-col gap-1">
+                {draft.education.map((edu, index) => (
+                  <p key={index} className="text-sm text-text-h">
+                    {joinTruthy([joinTruthy([edu.degree, edu.school], ', '), edu.date && `(${edu.date})`], ' ')}
+                  </p>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {draft.certifications?.length > 0 && (
+            <section>
+              <p className="mb-1.5 border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-text-h">
+                Certifications
+              </p>
+              <ul className="flex flex-col gap-1 text-sm text-text-h">
+                {draft.certifications.map((cert, index) => (
+                  <li key={index} className="pl-3.5 -indent-3.5">• {cert}</li>
                 ))}
               </ul>
-            ) : (
-              <p className="text-sm text-text-h">(not written yet)</p>
-            )}
-          </div>
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-text/70">Skills</p>
-            <p className="text-sm text-text-h">{draft.skillsSection || '(not written yet)'}</p>
-          </div>
+            </section>
+          )}
         </div>
       )}
 
@@ -192,18 +269,27 @@ export default function ResumeBuilderPage() {
     try {
       const result = await chatMutation.mutateAsync({
         conversation: nextMessages.map(({ role, content: text }) => ({ role, content: text })),
-        currentSummary: draft?.summary || '',
-        currentExperienceBullets: draft?.experienceBullets || [],
-        currentSkillsSection: draft?.skillsSection || '',
+        currentDraft: {
+          title: draft?.title || '',
+          summary: draft?.summary || '',
+          skills: draft?.skills || [],
+          experience: draft?.experience || [],
+          education: draft?.education || [],
+          certifications: draft?.certifications || [],
+        },
         jdContent: jdContentOverride ?? jdContent,
         attachment,
       })
       updateState({
         messages: [...nextMessages, { role: 'assistant', content: result.reply, source: result.source }],
         draft: {
+          title: result.title,
           summary: result.summary,
-          experienceBullets: result.experienceBullets,
-          skillsSection: result.skillsSection,
+          skills: result.skills,
+          experience: result.experience,
+          education: result.education,
+          certifications: result.certifications,
+          contact: result.contact,
         },
       })
       saveMutation.reset()
@@ -306,9 +392,12 @@ export default function ResumeBuilderPage() {
     saveMutation.mutate(
       {
         resumeId: activeResume?.id,
+        title: draft.title,
         summary: draft.summary,
-        experienceBullets: draft.experienceBullets,
-        skillsSection: draft.skillsSection,
+        skills: draft.skills,
+        experience: draft.experience,
+        education: draft.education,
+        certifications: draft.certifications,
       },
       {
         onSuccess: (result) => {

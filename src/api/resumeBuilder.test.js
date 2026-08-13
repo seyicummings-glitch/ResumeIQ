@@ -10,12 +10,25 @@ beforeEach(() => {
   apiRequest.mockReset()
 })
 
+const RAW_CONTACT = { full_name: 'Jordan Mitchell', email: 'jordan@example.com', phone: '555-1234', linkedin: 'in/jordan', location: 'Austin, TX' }
+const CONTACT = { fullName: 'Jordan Mitchell', email: 'jordan@example.com', phone: '555-1234', linkedin: 'in/jordan', location: 'Austin, TX' }
+
+const RAW_EXPERIENCE = [{ title: 'Marketing Manager', company: 'Acme Co.', start_date: 'Mar 2022', end_date: 'Present', bullets: ['Did a thing.'] }]
+const EXPERIENCE = [{ title: 'Marketing Manager', company: 'Acme Co.', startDate: 'Mar 2022', endDate: 'Present', bullets: ['Did a thing.'] }]
+
+const RAW_EDUCATION = [{ degree: 'BBA, Marketing', school: 'UT Austin', date: 'May 2017' }]
+const EDUCATION = [{ degree: 'BBA, Marketing', school: 'UT Austin', date: 'May 2017' }]
+
 describe('generateEnhancedResume', () => {
   it('calls POST /resume-builder/generate and maps snake_case to camelCase', async () => {
     apiRequest.mockResolvedValue({
+      title: 'Marketing Professional',
       summary: 'A summary.',
-      experience_bullets: ['Did a thing.'],
-      skills_section: 'Python, SQL',
+      skills: ['SEO', 'CRM'],
+      experience: RAW_EXPERIENCE,
+      education: RAW_EDUCATION,
+      certifications: ['HubSpot Certified'],
+      contact: RAW_CONTACT,
       source: 'ai',
       overall_assessment: undefined,
       resume_id: 7,
@@ -25,9 +38,13 @@ describe('generateEnhancedResume', () => {
 
     expect(apiRequest).toHaveBeenCalledWith('/resume-builder/generate', { method: 'POST', auth: true })
     expect(result).toEqual({
+      title: 'Marketing Professional',
       summary: 'A summary.',
-      experienceBullets: ['Did a thing.'],
-      skillsSection: 'Python, SQL',
+      skills: ['SEO', 'CRM'],
+      experience: EXPERIENCE,
+      education: EDUCATION,
+      certifications: ['HubSpot Certified'],
+      contact: CONTACT,
       source: 'ai',
       overallAssessment: undefined,
       resumeId: 7,
@@ -39,17 +56,26 @@ describe('chatAboutResume', () => {
   it('sends the conversation and current draft in snake_case, and maps the reply back', async () => {
     apiRequest.mockResolvedValue({
       reply: 'Done.',
+      title: 'Marketing Professional',
       summary: 'Updated summary.',
-      experience_bullets: ['One bullet.'],
-      skills_section: 'Go, Rust',
+      skills: ['Go', 'Rust'],
+      experience: RAW_EXPERIENCE,
+      education: RAW_EDUCATION,
+      certifications: [],
+      contact: RAW_CONTACT,
       source: 'ai',
     })
 
     const result = await chatAboutResume({
       conversation: [{ role: 'user', content: 'Remove the second bullet.' }],
-      currentSummary: 'Old summary.',
-      currentExperienceBullets: ['One bullet.', 'Two bullet.'],
-      currentSkillsSection: 'Go',
+      currentDraft: {
+        title: 'Old title',
+        summary: 'Old summary.',
+        skills: ['Go'],
+        experience: EXPERIENCE,
+        education: EDUCATION,
+        certifications: [],
+      },
     })
 
     expect(apiRequest).toHaveBeenCalledWith('/resume-builder/chat', {
@@ -57,18 +83,25 @@ describe('chatAboutResume', () => {
       auth: true,
       body: {
         conversation: [{ role: 'user', content: 'Remove the second bullet.' }],
+        current_title: 'Old title',
         current_summary: 'Old summary.',
-        current_experience_bullets: ['One bullet.', 'Two bullet.'],
-        current_skills_section: 'Go',
+        current_skills: ['Go'],
+        current_experience: RAW_EXPERIENCE,
+        current_education: RAW_EDUCATION,
+        current_certifications: [],
         jd_content: '',
         attachment: null,
       },
     })
     expect(result).toEqual({
       reply: 'Done.',
+      title: 'Marketing Professional',
       summary: 'Updated summary.',
-      experienceBullets: ['One bullet.'],
-      skillsSection: 'Go, Rust',
+      skills: ['Go', 'Rust'],
+      experience: EXPERIENCE,
+      education: EDUCATION,
+      certifications: [],
+      contact: CONTACT,
       source: 'ai',
     })
   })
@@ -76,17 +109,19 @@ describe('chatAboutResume', () => {
   it('includes jd_content when a job description was extracted for grounding', async () => {
     apiRequest.mockResolvedValue({
       reply: 'Tailored to the job.',
+      title: '',
       summary: 'Updated summary.',
-      experience_bullets: [],
-      skills_section: 'Python',
+      skills: ['Python'],
+      experience: [],
+      education: [],
+      certifications: [],
+      contact: RAW_CONTACT,
       source: 'ai',
     })
 
     await chatAboutResume({
       conversation: [{ role: 'user', content: 'Tailor my resume to this job.' }],
-      currentSummary: '',
-      currentExperienceBullets: [],
-      currentSkillsSection: '',
+      currentDraft: { title: '', summary: '', skills: [], experience: [], education: [], certifications: [] },
       jdContent: 'We need a Backend Engineer skilled in Python.',
     })
 
@@ -97,17 +132,19 @@ describe('chatAboutResume', () => {
   it('maps an attachment to snake_case when one is included', async () => {
     apiRequest.mockResolvedValue({
       reply: "That's a screenshot of a job posting.",
+      title: '',
       summary: '',
-      experience_bullets: [],
-      skills_section: '',
+      skills: [],
+      experience: [],
+      education: [],
+      certifications: [],
+      contact: RAW_CONTACT,
       source: 'ai',
     })
 
     await chatAboutResume({
       conversation: [{ role: 'user', content: 'what does this say?' }],
-      currentSummary: '',
-      currentExperienceBullets: [],
-      currentSkillsSection: '',
+      currentDraft: { title: '', summary: '', skills: [], experience: [], education: [], certifications: [] },
       attachment: { filename: 'job-posting.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=' },
     })
 
@@ -126,9 +163,12 @@ describe('saveEnhancedResume', () => {
 
     const result = await saveEnhancedResume({
       resumeId: 3,
+      title: 'Marketing Professional',
       summary: 'Summary.',
-      experienceBullets: ['Bullet.'],
-      skillsSection: 'Python',
+      skills: ['Python'],
+      experience: EXPERIENCE,
+      education: EDUCATION,
+      certifications: ['HubSpot Certified'],
     })
 
     expect(apiRequest).toHaveBeenCalledWith('/resume-builder/save', {
@@ -136,9 +176,12 @@ describe('saveEnhancedResume', () => {
       auth: true,
       body: {
         resume_id: 3,
+        title: 'Marketing Professional',
         summary: 'Summary.',
-        experience_bullets: ['Bullet.'],
-        skills_section: 'Python',
+        skills: ['Python'],
+        experience: RAW_EXPERIENCE,
+        education: RAW_EDUCATION,
+        certifications: ['HubSpot Certified'],
       },
     })
     expect(result).toEqual({ message: 'Saved.', resumeId: 3, version: 2, label: 'v2 (AI-enhanced)' })
@@ -149,9 +192,12 @@ describe('saveEnhancedResume', () => {
 
     await saveEnhancedResume({
       resumeId: undefined,
+      title: '',
       summary: 'Summary.',
-      experienceBullets: [],
-      skillsSection: '',
+      skills: [],
+      experience: [],
+      education: [],
+      certifications: [],
     })
 
     const [, options] = apiRequest.mock.calls[0]
