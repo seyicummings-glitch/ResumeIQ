@@ -83,6 +83,23 @@ def test_languages_and_references_sections_are_recognized():
     assert "Jane Doe" in result["references"]
 
 
+def test_short_sentence_mentioning_a_header_word_is_not_treated_as_a_header():
+    # "...6 years of experience." is short enough to slip under the header-length cutoff, but
+    # it's a sentence (ends in a period), not a header — must not be mistaken for "Experience".
+    text = (
+        "Jordan Mitchell\n\n"
+        "Summary\n"
+        "Marketing manager with 6 years of experience.\n\n"
+        "Skills\n"
+        "SEO, CRM, Negotiation\n\n"
+        "Experience\n"
+        "Senior Marketing Manager at Acme, 2022 - Present.\n"
+    )
+    result = structure_resume(text)
+    assert result["summary"] == "Marketing manager with 6 years of experience."
+    assert "Senior Marketing Manager" in result["experience"]
+
+
 def test_long_line_mentioning_a_header_word_is_not_treated_as_a_header():
     text = (
         "Summary\n"

@@ -69,12 +69,15 @@ _MAX_HEADER_LINE_LENGTH = 50
 
 
 def find_section_positions(text: str) -> dict:
-    """Find where each known section starts in the text. Uses a lenient match —
-    a short line just needs to contain one of the known header phrases, not
-    equal it exactly — since real resumes format headers all sorts of ways
-    ("Technical Skills & Tools", "1. Work Experience", "EDUCATION:") that a
-    strict exact-line match would silently miss, wrongly reporting a section
-    that's genuinely on the resume as "not found"."""
+    """Find where each known section starts in the text. Uses a lenient match for the
+    "contains" case — a short line just needs to contain one of the known header phrases, not
+    equal it exactly — since real resumes format headers all sorts of ways ("Technical Skills &
+    Tools", "1. Work Experience", "EDUCATION:") that a strict exact-line match would silently
+    miss, wrongly reporting a section that's genuinely on the resume as "not found". That loose
+    match is skipped for lines ending in sentence-terminal punctuation (. ! ?), though — a real
+    header is a short label, never a sentence, and without this a perfectly ordinary summary
+    sentence like "Marketing manager with 6 years of experience." gets mistaken for an
+    "Experience" header purely for mentioning the word."""
     positions = {}
     lines = text.split("\n")
 
@@ -82,10 +85,14 @@ def find_section_positions(text: str) -> dict:
         clean_line = line.strip().lower().rstrip(":")
         if not clean_line or len(clean_line) > _MAX_HEADER_LINE_LENGTH:
             continue
+        looks_like_a_sentence = clean_line.endswith((".", "!", "?"))
         for section, keywords in SECTION_HEADERS.items():
             if section in positions:
                 continue
-            if any(clean_line == kw or kw in clean_line for kw in keywords):
+            if any(clean_line == kw for kw in keywords):
+                positions[section] = i
+                break
+            if not looks_like_a_sentence and any(kw in clean_line for kw in keywords):
                 positions[section] = i
                 break
 

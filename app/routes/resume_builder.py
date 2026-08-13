@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.services.resume_builder import generate_enhanced_resume, chat_about_resume
-from app.services.resume_structurer import extract_skills_list
+from app.services.resume_structurer import extract_skills_list, structure_resume
 from app.services.analysis_store import get_latest_analysis
 from app.services.platform_settings import is_ai_enabled
 from app.services.attachment_ai import analyze_attachment
@@ -68,8 +68,14 @@ def generate_resume(
     if analysis and analysis.result_json:
         missing_skills = analysis.result_json.get("skill_match", {}).get("missing_skills", []) or []
 
+    # Prefer the actually-parsed "Summary" section over a blind character-count truncation of
+    # the whole document — a raw slice of raw_text runs straight through into other sections'
+    # headers and content (e.g. "...\n\nSkills\nPython, SQL\n\nExperience\n..."), which reads as
+    # garbled noise once it lands in the "Professional Summary" field on the no-AI fallback path.
+    parsed_summary = structure_resume(resume.raw_text or "").get("summary", "").strip()
+
     fallback_data = {
-        "original_summary": resume.raw_text[:500] if resume.raw_text else "",
+        "original_summary": parsed_summary or (resume.raw_text[:500] if resume.raw_text else ""),
         "original_experience": resume.experience or "",
         "original_education": resume.education or "",
         "original_certifications": resume.certifications or "",

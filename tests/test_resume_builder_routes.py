@@ -54,6 +54,33 @@ def test_generate_resume_contact_handles_missing_profile_fields_gracefully(db_se
     assert result["contact"]["email"] == "jordan@example.com"
 
 
+def test_generate_resume_fallback_summary_uses_parsed_summary_section_not_raw_dump(db_session, monkeypatch):
+    """Regression test: the no-AI fallback used to slice the first 500 characters of the whole
+    raw_text, which runs straight through into later sections' headers/content once the summary
+    itself is short. It must use the actually-parsed Summary section instead."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY_2", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    user = _user(db_session)
+    _resume(db_session, user, raw_text=(
+        "Jordan Mitchell\n\n"
+        "Summary\n"
+        "Marketing manager with 6 years of experience.\n\n"
+        "Skills\n"
+        "SEO, CRM, Negotiation\n\n"
+        "Experience\n"
+        "Senior Marketing Manager at Acme, 2022 - Present.\n"
+    ))
+
+    result = routes.generate_resume(db=db_session, current_user=user)
+
+    assert result["source"] == "fallback"
+    assert result["summary"] == "Marketing manager with 6 years of experience."
+    assert "Skills" not in result["summary"]
+    assert "Experience" not in result["summary"]
+
+
 def test_chat_resume_merges_contact_info_into_response(db_session):
     user = _user(db_session)
     input_data = routes.ResumeBuilderChatInput(
