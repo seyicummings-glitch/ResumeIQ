@@ -27,6 +27,7 @@ import clsx from 'clsx'
 import { useLearningRoadmap, useToggleRoadmapTopic, useRegenerateRoadmap } from '../hooks/useLearningRoadmap'
 import { trackRoadmapResourceClick } from '../api/roadmap'
 import { useCareerCoachContext } from '../coach/CareerCoachContext'
+import FeatureLimitNotice from '../components/subscription/FeatureLimitNotice'
 import Card from '../components/ui/Card'
 import Button, { buttonClasses } from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
@@ -422,13 +423,19 @@ export default function LearningRoadmapPage() {
   const regenerateMutation = useRegenerateRoadmap()
   const { openCoach } = useCareerCoachContext()
   const { showToast } = useToast()
+  const [limitDetail, setLimitDetail] = useState(null)
 
   async function handleRegenerate() {
+    setLimitDetail(null)
     try {
       await regenerateMutation.mutateAsync()
       showToast('Generated a new roadmap.', { tone: 'success' })
     } catch (err) {
-      showToast(err.message, { tone: 'error' })
+      if (err.status === 402) {
+        setLimitDetail(err.detail)
+      } else {
+        showToast(err.message, { tone: 'error' })
+      }
     }
   }
 
@@ -508,6 +515,8 @@ export default function LearningRoadmapPage() {
           </Button>
         </div>
       </div>
+
+      <FeatureLimitNotice detail={limitDetail} onDismiss={() => setLimitDetail(null)} />
 
       <Card>
         <div className="mb-2 flex items-center justify-between text-sm">

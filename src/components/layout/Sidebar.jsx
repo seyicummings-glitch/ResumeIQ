@@ -19,6 +19,11 @@ import {
   Settings,
   CreditCard,
   GraduationCap,
+  Sliders,
+  Coins,
+  UserCheck,
+  Receipt,
+  Wallet,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../auth/AuthContext'
@@ -34,6 +39,7 @@ export const NAV_ITEMS = [
   { to: '/interview-practice', label: 'Interview Practice', icon: MessageSquare },
   { to: '/history', label: 'Analysis History', icon: Clock },
   { to: '/resume/versions', label: 'Version History', icon: GitCompare },
+  { to: '/subscription', label: 'Plan & Credits', icon: Wallet },
   { to: '/profile', label: 'My Profile', icon: User },
 ]
 
@@ -51,7 +57,13 @@ const ADMIN_NAV_GROUPS = [
   },
   {
     label: 'Subscriptions',
-    items: [{ to: '/admin/subscriptions/plans', label: 'Plans', icon: CreditCard }],
+    items: [
+      { to: '/admin/subscriptions/plans', label: 'Plans', icon: CreditCard },
+      { to: '/admin/subscriptions/features', label: 'Feature Settings', icon: Sliders },
+      { to: '/admin/subscriptions/credits', label: 'Credits & Payments', icon: Coins },
+      { to: '/admin/subscriptions/subscribers', label: 'Subscribers', icon: UserCheck },
+      { to: '/admin/subscriptions/transactions', label: 'Transactions', icon: Receipt },
+    ],
   },
   {
     label: 'Content & Activity',

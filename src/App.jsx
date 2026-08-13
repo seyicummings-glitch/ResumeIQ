@@ -20,10 +20,15 @@ import InterviewPracticePage from './pages/InterviewPracticePage'
 import LearningRoadmapPage from './pages/LearningRoadmapPage'
 import ResumeBuilderPage from './pages/ResumeBuilderPage'
 import VersionHistoryPage from './pages/VersionHistoryPage'
+import SubscriptionPage from './pages/SubscriptionPage'
 import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import AdminUsersPage from './pages/admin/AdminUsersPage'
 import AdminUserDetailPage from './pages/admin/AdminUserDetailPage'
 import AdminPlansPage from './pages/admin/AdminPlansPage'
+import AdminFeatureSettingsPage from './pages/admin/AdminFeatureSettingsPage'
+import AdminCreditsAndPaymentsPage from './pages/admin/AdminCreditsAndPaymentsPage'
+import AdminSubscribersPage from './pages/admin/AdminSubscribersPage'
+import AdminTransactionsPage from './pages/admin/AdminTransactionsPage'
 import AdminSkillResourcesPage from './pages/admin/AdminSkillResourcesPage'
 import AdminReportsPage from './pages/admin/AdminReportsPage'
 import AdminAnalyticsPage from './pages/admin/AdminAnalyticsPage'
@@ -58,6 +63,7 @@ export default function App() {
           <Route path="/roadmap" element={<LearningRoadmapPage />} />
           <Route path="/resume-builder" element={<ResumeBuilderPage />} />
           <Route path="/resume/versions" element={<VersionHistoryPage />} />
+          <Route path="/subscription" element={<SubscriptionPage />} />
         </Route>
 
         {/* Admin */}
@@ -67,6 +73,10 @@ export default function App() {
             <Route path="/admin/users" element={<AdminUsersPage />} />
             <Route path="/admin/users/:id" element={<AdminUserDetailPage />} />
             <Route path="/admin/subscriptions/plans" element={<AdminPlansPage />} />
+            <Route path="/admin/subscriptions/features" element={<AdminFeatureSettingsPage />} />
+            <Route path="/admin/subscriptions/credits" element={<AdminCreditsAndPaymentsPage />} />
+            <Route path="/admin/subscriptions/subscribers" element={<AdminSubscribersPage />} />
+            <Route path="/admin/subscriptions/transactions" element={<AdminTransactionsPage />} />
             <Route path="/admin/skill-resources" element={<AdminSkillResourcesPage />} />
             <Route path="/admin/reports" element={<AdminReportsPage />} />
             <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
