@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from app.models.models import User
-from app.models.subscription_models import Plan, PlanLimit
+from app.models.subscription_models import Plan, PlanLimit, Subscription, Transaction, CreditPackage
 from app.routes import admin_subscriptions as routes
 
 
@@ -159,3 +159,162 @@ def test_list_plans_paginates_and_filters_by_status(db_session):
 
     all_plans = routes.list_plans(page=1, pageSize=20, search=None, status=None, db=db_session, current_user=admin)
     assert all_plans["total"] == 3
+
+
+def test_delete_plan_rejects_when_plan_has_subscribers(db_session):
+    admin = _admin(db_session)
+    plan = Plan(name="Premium", slug="premium", monthly_price_cents=1999)
+    db_session.add(plan)
+    db_session.commit()
+    db_session.refresh(plan)
+
+    user = User(email="subscriber@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    db_session.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
+    db_session.commit()
+
+    with pytest.raises(Exception) as exc_info:
+        routes.delete_plan(plan.id, db_session, admin)
+    assert exc_info.value.status_code == 400
+    assert db_session.query(Plan).filter(Plan.id == plan.id).count() == 1
+
+
+# --- AI feature settings ---------------------------------------------------------
+
+def test_list_feature_settings_seeds_all_known_features(db_session):
+    from app.services.subscription_limits import FEATURE_KEYS
+
+    admin = _admin(db_session)
+    result = routes.list_feature_settings(db_session, admin)
+    assert {r["featureKey"] for r in result} == set(FEATURE_KEYS)
+    assert all(r["isPaid"] is False for r in result)
+
+
+def test_update_feature_setting_persists_changes(db_session):
+    admin = _admin(db_session)
+    result = routes.update_feature_setting(
+        "ai_resume_builder", routes.FeatureSettingUpdateInput(isPaid=True, creditCostPerUse=10, isEnabled=True),
+        db_session, admin,
+    )
+    assert result == {"featureKey": "ai_resume_builder", "featureLabel": "AI Resume Builder", "isPaid": True, "creditCostPerUse": 10, "isEnabled": True}
+
+
+def test_update_feature_setting_rejects_unknown_feature_key(db_session):
+    admin = _admin(db_session)
+    with pytest.raises(Exception) as exc_info:
+        routes.update_feature_setting("not_real", routes.FeatureSettingUpdateInput(isPaid=True, creditCostPerUse=5), db_session, admin)
+    assert exc_info.value.status_code == 400
+
+
+def test_update_feature_setting_rejects_negative_credit_cost(db_session):
+    admin = _admin(db_session)
+    with pytest.raises(Exception) as exc_info:
+        routes.update_feature_setting("ai_resume_builder", routes.FeatureSettingUpdateInput(isPaid=True, creditCostPerUse=-5), db_session, admin)
+    assert exc_info.value.status_code == 400
+
+
+# --- Credit packages --------------------------------------------------------------
+
+def test_create_and_list_credit_packages(db_session):
+    admin = _admin(db_session)
+    routes.create_credit_package(routes.CreditPackageInput(name="100 Credits", credits=100, priceCents=999), db_session, admin)
+    routes.create_credit_package(routes.CreditPackageInput(name="500 Credits", credits=500, priceCents=3999, displayOrder=1), db_session, admin)
+
+    result = routes.list_credit_packages(db_session, admin)
+    assert len(result) == 2
+    assert result[0]["name"] == "100 Credits"
+
+
+def test_create_credit_package_rejects_non_positive_values(db_session):
+    admin = _admin(db_session)
+    with pytest.raises(Exception) as exc_info:
+        routes.create_credit_package(routes.CreditPackageInput(name="Bad", credits=0, priceCents=999), db_session, admin)
+    assert exc_info.value.status_code == 400
+
+
+def test_update_and_toggle_credit_package(db_session):
+    admin = _admin(db_session)
+    created = routes.create_credit_package(routes.CreditPackageInput(name="100 Credits", credits=100, priceCents=999), db_session, admin)
+
+    updated = routes.update_credit_package(created["id"], routes.CreditPackageInput(name="150 Credits", credits=150, priceCents=1299), db_session, admin)
+    assert updated["credits"] == 150
+
+    toggled = routes.set_credit_package_status(created["id"], routes.PackageStatusInput(isActive=False), db_session, admin)
+    assert toggled["isActive"] is False
+
+
+def test_delete_credit_package(db_session):
+    admin = _admin(db_session)
+    created = routes.create_credit_package(routes.CreditPackageInput(name="100 Credits", credits=100, priceCents=999), db_session, admin)
+    routes.delete_credit_package(created["id"], db_session, admin)
+    assert db_session.query(CreditPackage).count() == 0
+
+
+# --- Payment methods ---------------------------------------------------------------
+
+def test_list_payment_methods_seeds_defaults(db_session):
+    admin = _admin(db_session)
+    result = routes.list_payment_methods(db_session, admin)
+    assert {m["methodKey"] for m in result} == {"credit_card", "debit_card", "paypal", "bitcoin"}
+
+
+def test_set_payment_method_status_toggles(db_session):
+    admin = _admin(db_session)
+    routes.list_payment_methods(db_session, admin)  # seed first
+    result = routes.set_payment_method_status("bitcoin", routes.PaymentMethodStatusInput(isEnabled=False), db_session, admin)
+    assert result["isEnabled"] is False
+
+
+def test_set_payment_method_status_rejects_unknown_method(db_session):
+    admin = _admin(db_session)
+    with pytest.raises(Exception) as exc_info:
+        routes.set_payment_method_status("carrier_pigeon", routes.PaymentMethodStatusInput(isEnabled=True), db_session, admin)
+    assert exc_info.value.status_code == 404
+
+
+# --- Subscribers & transactions ---------------------------------------------------
+
+def test_list_subscribers_returns_joined_user_and_plan_info(db_session):
+    admin = _admin(db_session)
+    plan = Plan(name="Premium", slug="premium", monthly_price_cents=1999)
+    db_session.add(plan)
+    db_session.commit()
+    db_session.refresh(plan)
+    user = User(email="jane@example.com", hashed_password="x", full_name="Jane Doe")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    db_session.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
+    db_session.commit()
+
+    result = routes.list_subscribers(page=1, pageSize=20, planId=None, status=None, db=db_session, current_user=admin)
+    assert result["total"] == 1
+    assert result["items"][0]["userName"] == "Jane Doe"
+    assert result["items"][0]["planName"] == "Premium"
+
+
+def test_list_transactions_filters_by_status_and_kind(db_session):
+    admin = _admin(db_session)
+    user = User(email="jane@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    db_session.add_all([
+        Transaction(user_id=user.id, kind="credit_purchase", amount_cents=999, currency="usd", status="paid", credits_purchased=100),
+        Transaction(user_id=user.id, kind="subscription", amount_cents=1999, currency="usd", status="failed"),
+    ])
+    db_session.commit()
+
+    paid_only = routes.list_transactions(page=1, pageSize=20, status="paid", kind=None, db=db_session, current_user=admin)
+    assert paid_only["total"] == 1
+    assert paid_only["items"][0]["kind"] == "credit_purchase"
+    assert paid_only["items"][0]["creditsPurchased"] == 100
+
+
+def test_get_subscription_analytics_route_returns_a_dict(db_session):
+    admin = _admin(db_session)
+    result = routes.get_subscription_analytics(db_session, admin)
+    assert "totalCreditsPurchased" in result
+    assert "usersNearLimit" in result

@@ -15,6 +15,7 @@ from app.services.learning_roadmap import build_roadmap, detect_profession_categ
 from app.services.learning_roadmap_ai import generate_learning_roadmap
 from app.services.skill_resources import fetch_all_resources, get_resource_links
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_ROADMAP
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 
 router = APIRouter(prefix="/roadmap", tags=["Learning Roadmap"])
 
@@ -219,6 +220,11 @@ def regenerate_roadmap(
                 status_code=400,
                 detail="Set a target role in your profile or save an analysis first so the roadmap has context to build from.",
             )
+
+        try:
+            check_and_consume(db, current_user, "learning_roadmap")
+        except FeatureAccessDenied as exc:
+            raise HTTPException(status_code=402, detail=exc.payload)
 
         roadmap = _generate_and_save_roadmap(db, current_user, request)
         return {"has_context": True, "roadmap": _serialize_roadmap(db, roadmap, current_user.id)}

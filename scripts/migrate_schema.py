@@ -61,6 +61,12 @@ STATEMENTS = [
     # Claude key was never read or written by any route and was just sitting
     # on the table unused.
     "ALTER TABLE users DROP COLUMN IF EXISTS claude_api_key",
+    # Subscription & credit management — transactions now cover both plan
+    # charges and credit-package purchases (see app/models/subscription_models.py)
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS kind VARCHAR NOT NULL DEFAULT 'subscription'",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS credits_purchased INTEGER",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS external_reference VARCHAR",
 ]
 
 

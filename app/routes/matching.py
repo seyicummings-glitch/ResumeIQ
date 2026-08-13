@@ -14,6 +14,7 @@ from app.services.readiness_scorer import calculate_hiring_readiness, explain_hi
 from app.services.ai_suggestions import generate_resume_suggestions
 from app.services.platform_settings import is_ai_enabled
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_RESUME_ANALYZER
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 from app.security import get_session_id_from_request
 from app.database import get_db
 from app.models.models import Resume, JobDescription, AnalysisResult, User
@@ -110,6 +111,11 @@ def save_analysis(
         ).first()
         if not job_description:
             raise HTTPException(status_code=404, detail="Job description not found.")
+
+        try:
+            check_and_consume(db, current_user, "resume_analysis")
+        except FeatureAccessDenied as exc:
+            raise HTTPException(status_code=402, detail=exc.payload)
 
         # Checked before inserting the new row below, so this reflects whether an
         # analysis for this exact resume already existed prior to this call.

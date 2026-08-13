@@ -35,7 +35,8 @@ from app.models.interview_models import InterviewSession
 from app.models.skill_assessment_models import SkillAssessmentAttempt
 from app.models.roadmap_models import LearningRoadmap
 from app.models.document_models import GeneratedDocument
-from app.models.subscription_models import Subscription, Transaction
+from app.models.subscription_models import Transaction
+from app.services.subscription_admin import count_paid_active_subscribers
 from app.services.admin_analytics import compute_top_missing_skills
 from app.services.analytics import EVENT_TYPES
 from app.services.analytics_reporting import (
@@ -138,7 +139,7 @@ def _revenue_analytics(db: Session, bounds: dict) -> dict:
         .scalar() or 0
     )
     return {
-        "activeSubscribers": db.query(func.count(Subscription.id)).filter(Subscription.status == "active").scalar() or 0,
+        "activeSubscribers": count_paid_active_subscribers(db),
         "monthlyRevenue": round(monthly_cents / 100, 2),
         "annualRevenue": round(annual_cents / 100, 2),
         "failedPayments": db.query(func.count(Transaction.id)).filter(Transaction.status == "failed").scalar() or 0,

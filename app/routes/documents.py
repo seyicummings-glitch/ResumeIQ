@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models.models import AnalysisResult, Resume, JobDescription, User
 from app.services.pdf_report import generate_analysis_pdf
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_DOCUMENTS
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 from app.security import get_current_user, get_session_id_from_request
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -49,6 +50,11 @@ def generate_document(
         ).first()
         if not analysis:
             raise HTTPException(status_code=404, detail="Analysis not found.")
+
+        try:
+            check_and_consume(db, current_user, "documents")
+        except FeatureAccessDenied as exc:
+            raise HTTPException(status_code=402, detail=exc.payload)
 
         resume = db.query(Resume).filter(Resume.id == analysis.resume_id).first()
         job_description = db.query(JobDescription).filter(JobDescription.id == analysis.job_description_id).first()

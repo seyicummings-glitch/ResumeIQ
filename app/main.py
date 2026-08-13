@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from starlette.responses import JSONResponse
-from app.routes import resume, auth, job_description, matching, github_analyzer, recommendations, health, documents, skill_assessment, interview, roadmap, resume_builder, admin, admin_users, admin_dashboard, admin_subscriptions, admin_skill_resources, career_coach, ai_conversations
+from app.routes import resume, auth, job_description, matching, github_analyzer, recommendations, health, documents, skill_assessment, interview, roadmap, resume_builder, admin, admin_users, admin_dashboard, admin_subscriptions, admin_skill_resources, career_coach, ai_conversations, subscriptions
 from app.database import engine, Base, SessionLocal
 from app.models import models, document_models, skill_assessment_models, roadmap_models, admin_models, interview_models, ai_conversation_models, subscription_models, skill_resource_models, analytics_models
 from app.models.admin_models import AppSetting
@@ -86,6 +86,7 @@ app.include_router(admin_users.router)
 app.include_router(admin_dashboard.router)
 app.include_router(admin_subscriptions.router)
 app.include_router(admin_skill_resources.router)
+app.include_router(subscriptions.router)
 
 
 @app.get("/")

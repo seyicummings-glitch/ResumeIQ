@@ -4,11 +4,18 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import User
-from app.models.subscription_models import Plan, PlanLimit
+from app.models.subscription_models import (
+    Plan, PlanLimit, Subscription, Transaction, AiFeatureSetting, CreditPackage, PaymentMethodConfig,
+)
 from app.security import require_admin
 from app.services.pagination import paginate, page_response
 from app.services.subscription_limits import FEATURE_KEYS
 from app.services.stripe_client import sync_plan_to_stripe
+from app.services.subscription_admin import (
+    get_or_seed_feature_settings,
+    get_or_seed_payment_methods,
+    compute_subscription_analytics,
+)
 
 router = APIRouter(prefix="/admin/subscriptions", tags=["Admin - Subscriptions"])
 
@@ -159,12 +166,16 @@ def set_plan_status(
 
 @router.delete("/plans/{plan_id}")
 def delete_plan(plan_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    """No subscriber check yet — the Subscription table doesn't exist until
-    Wave 2, so no plan can have real subscribers today. Wave 2 must add a
-    guard here once Subscription exists."""
     plan = db.query(Plan).filter(Plan.id == plan_id).first()
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+
+    subscriber_count = db.query(Subscription).filter(Subscription.plan_id == plan_id).count()
+    if subscriber_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can't delete a plan with {subscriber_count} subscriber(s) — deactivate it instead.",
+        )
 
     db.query(PlanLimit).filter(PlanLimit.plan_id == plan_id).delete()
     db.delete(plan)
@@ -217,3 +228,255 @@ def update_plan_limits(
 
     db.commit()
     return get_plan_limits(plan_id, db, current_user)
+
+
+# ---------------------------------------------------------------------------
+# AI feature settings — global, cross-plan controls: does a feature require
+# payment at all once a plan's included allowance runs out, and at what
+# credit cost. See app/services/feature_gate.py for how these get enforced.
+# ---------------------------------------------------------------------------
+
+def _serialize_feature_setting(setting: AiFeatureSetting) -> dict:
+    return {
+        "featureKey": setting.feature_key,
+        "featureLabel": setting.feature_label,
+        "isPaid": setting.is_paid,
+        "creditCostPerUse": setting.credit_cost_per_use,
+        "isEnabled": setting.is_enabled,
+    }
+
+
+@router.get("/feature-settings")
+def list_feature_settings(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    return [_serialize_feature_setting(setting) for setting in get_or_seed_feature_settings(db)]
+
+
+class FeatureSettingUpdateInput(BaseModel):
+    isPaid: bool
+    creditCostPerUse: int = 0
+    isEnabled: bool = True
+
+
+@router.put("/feature-settings/{feature_key}")
+def update_feature_setting(
+    feature_key: str, data: FeatureSettingUpdateInput,
+    db: Session = Depends(get_db), current_user: User = Depends(require_admin),
+):
+    if feature_key not in FEATURE_KEYS:
+        raise HTTPException(status_code=400, detail=f"Unknown feature key: {feature_key}")
+    if data.creditCostPerUse < 0:
+        raise HTTPException(status_code=400, detail="Credit cost can't be negative.")
+
+    get_or_seed_feature_settings(db)  # ensures a row exists for every known feature
+    setting = db.query(AiFeatureSetting).filter(AiFeatureSetting.feature_key == feature_key).first()
+    setting.is_paid = data.isPaid
+    setting.credit_cost_per_use = data.creditCostPerUse
+    setting.is_enabled = data.isEnabled
+    db.commit()
+    db.refresh(setting)
+    return _serialize_feature_setting(setting)
+
+
+# ---------------------------------------------------------------------------
+# Credit packages
+# ---------------------------------------------------------------------------
+
+def _serialize_package(package: CreditPackage) -> dict:
+    return {
+        "id": package.id,
+        "name": package.name,
+        "credits": package.credits,
+        "priceCents": package.price_cents,
+        "currency": package.currency,
+        "isActive": package.is_active,
+        "displayOrder": package.display_order,
+        "createdAt": package.created_at,
+    }
+
+
+@router.get("/credit-packages")
+def list_credit_packages(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    packages = db.query(CreditPackage).order_by(CreditPackage.display_order, CreditPackage.id).all()
+    return [_serialize_package(p) for p in packages]
+
+
+class CreditPackageInput(BaseModel):
+    name: str
+    credits: int
+    priceCents: int
+    currency: str = "usd"
+    displayOrder: int = 0
+
+
+@router.post("/credit-packages")
+def create_credit_package(data: CreditPackageInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    if data.credits <= 0 or data.priceCents <= 0:
+        raise HTTPException(status_code=400, detail="Credits and price must both be positive.")
+    package = CreditPackage(
+        name=data.name, credits=data.credits, price_cents=data.priceCents,
+        currency=data.currency, display_order=data.displayOrder,
+    )
+    db.add(package)
+    db.commit()
+    db.refresh(package)
+    return _serialize_package(package)
+
+
+@router.patch("/credit-packages/{package_id}")
+def update_credit_package(
+    package_id: int, data: CreditPackageInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    package = db.query(CreditPackage).filter(CreditPackage.id == package_id).first()
+    if not package:
+        raise HTTPException(status_code=404, detail="Credit package not found")
+    if data.credits <= 0 or data.priceCents <= 0:
+        raise HTTPException(status_code=400, detail="Credits and price must both be positive.")
+
+    package.name = data.name
+    package.credits = data.credits
+    package.price_cents = data.priceCents
+    package.currency = data.currency
+    package.display_order = data.displayOrder
+    db.commit()
+    db.refresh(package)
+    return _serialize_package(package)
+
+
+class PackageStatusInput(BaseModel):
+    isActive: bool
+
+
+@router.patch("/credit-packages/{package_id}/status")
+def set_credit_package_status(
+    package_id: int, data: PackageStatusInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    package = db.query(CreditPackage).filter(CreditPackage.id == package_id).first()
+    if not package:
+        raise HTTPException(status_code=404, detail="Credit package not found")
+    package.is_active = data.isActive
+    db.commit()
+    db.refresh(package)
+    return _serialize_package(package)
+
+
+@router.delete("/credit-packages/{package_id}")
+def delete_credit_package(package_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    package = db.query(CreditPackage).filter(CreditPackage.id == package_id).first()
+    if not package:
+        raise HTTPException(status_code=404, detail="Credit package not found")
+    db.delete(package)
+    db.commit()
+    return {"message": "Credit package deleted."}
+
+
+# ---------------------------------------------------------------------------
+# Payment methods
+# ---------------------------------------------------------------------------
+
+def _serialize_payment_method(method: PaymentMethodConfig) -> dict:
+    return {"methodKey": method.method_key, "label": method.label, "isEnabled": method.is_enabled}
+
+
+@router.get("/payment-methods")
+def list_payment_methods(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    return [_serialize_payment_method(m) for m in get_or_seed_payment_methods(db)]
+
+
+class PaymentMethodStatusInput(BaseModel):
+    isEnabled: bool
+
+
+@router.patch("/payment-methods/{method_key}/status")
+def set_payment_method_status(
+    method_key: str, data: PaymentMethodStatusInput, db: Session = Depends(get_db), current_user: User = Depends(require_admin)
+):
+    get_or_seed_payment_methods(db)
+    method = db.query(PaymentMethodConfig).filter(PaymentMethodConfig.method_key == method_key).first()
+    if not method:
+        raise HTTPException(status_code=404, detail="Unknown payment method")
+    method.is_enabled = data.isEnabled
+    db.commit()
+    db.refresh(method)
+    return _serialize_payment_method(method)
+
+
+# ---------------------------------------------------------------------------
+# Subscribers & transactions
+# ---------------------------------------------------------------------------
+
+@router.get("/subscribers")
+def list_subscribers(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=100),
+    planId: int | None = None,
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    query = db.query(Subscription, User, Plan).join(User, User.id == Subscription.user_id).join(Plan, Plan.id == Subscription.plan_id)
+    if planId is not None:
+        query = query.filter(Subscription.plan_id == planId)
+    if status:
+        query = query.filter(Subscription.status == status)
+    query = query.order_by(Subscription.created_at.desc())
+
+    total = query.count()
+    rows = query.offset((page - 1) * pageSize).limit(pageSize).all()
+    items = [
+        {
+            "subscriptionId": sub.id,
+            "userId": user.id,
+            "userName": user.full_name or user.email,
+            "userEmail": user.email,
+            "planId": plan.id,
+            "planName": plan.name,
+            "status": sub.status,
+            "billingCycle": sub.billing_cycle,
+            "currentPeriodEnd": sub.current_period_end,
+            "cancelAtPeriodEnd": sub.cancel_at_period_end,
+        }
+        for sub, user, plan in rows
+    ]
+    return page_response(items, total, page, pageSize)
+
+
+@router.get("/transactions")
+def list_transactions(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=100),
+    status: str | None = None,
+    kind: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    query = db.query(Transaction, User).join(User, User.id == Transaction.user_id)
+    if status:
+        query = query.filter(Transaction.status == status)
+    if kind:
+        query = query.filter(Transaction.kind == kind)
+    query = query.order_by(Transaction.created_at.desc())
+
+    total = query.count()
+    rows = query.offset((page - 1) * pageSize).limit(pageSize).all()
+    items = [
+        {
+            "id": tx.id,
+            "userId": user.id,
+            "userName": user.full_name or user.email,
+            "kind": tx.kind,
+            "amountCents": tx.amount_cents,
+            "currency": tx.currency,
+            "status": tx.status,
+            "paymentMethod": tx.payment_method,
+            "creditsPurchased": tx.credits_purchased,
+            "externalReference": tx.external_reference,
+            "createdAt": tx.created_at,
+        }
+        for tx, user in rows
+    ]
+    return page_response(items, total, page, pageSize)
+
+
+@router.get("/analytics")
+def get_subscription_analytics(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    return compute_subscription_analytics(db)

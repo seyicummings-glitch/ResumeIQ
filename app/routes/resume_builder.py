@@ -9,6 +9,7 @@ from app.services.analysis_store import get_latest_analysis
 from app.services.platform_settings import is_ai_enabled
 from app.services.attachment_ai import analyze_attachment
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_AI_BUILDER
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 from app.security import get_session_id_from_request
 from app.database import get_db
 from app.models.models import Resume, User
@@ -41,6 +42,11 @@ def generate_resume(
     resume = _get_latest_active_resume(db, current_user.id)
     if not resume:
         raise HTTPException(status_code=404, detail="No saved resume found. Upload and save a resume first.")
+
+    try:
+        check_and_consume(db, current_user, "ai_resume_builder")
+    except FeatureAccessDenied as exc:
+        raise HTTPException(status_code=402, detail=exc.payload)
 
     analysis = get_latest_analysis(db, current_user.id, resume_id=resume.id)
     missing_skills = []

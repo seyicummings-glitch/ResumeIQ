@@ -8,6 +8,7 @@ from app.security import get_current_user
 from app.services.platform_settings import is_ai_enabled
 from app.services.career_context import get_user_career_context, find_roadmap_topic, topic_context_text
 from app.services.career_coach_ai import get_coach_reply
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 
 router = APIRouter(prefix="/career-coach", tags=["Career Coach"])
 
@@ -37,6 +38,15 @@ def post_career_coach_chat(
     Optionally scoped further to a specific roadmap topic (topic_key)."""
     if not data.conversation:
         raise HTTPException(status_code=400, detail="conversation must include at least one message.")
+
+    if len(data.conversation) == 1:
+        # A single message with no prior AI reply is the first turn of a new coaching
+        # session (the frontend resends the growing transcript every turn) — gated here
+        # rather than on every turn, same pattern as interview_practice/ai_resume_builder.
+        try:
+            check_and_consume(db, current_user, "ai_chat")
+        except FeatureAccessDenied as exc:
+            raise HTTPException(status_code=402, detail=exc.payload)
 
     context = get_user_career_context(db, current_user)
     topic = find_roadmap_topic(context["roadmap"], data.topic_key)

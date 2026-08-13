@@ -13,6 +13,7 @@ from app.services.analysis_store import get_latest_analysis
 from app.services.resume_structurer import extract_skills_list
 from app.services.platform_settings import is_ai_enabled
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_SKILL_ASSESSMENT
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 from app.services.skill_assessment import (
     DIFFICULTY_WEIGHT,
     MAX_TOTAL_COUNT,
@@ -204,6 +205,11 @@ def build_skill_assessment(
                 "detected_categories": [],
                 "has_context": False,
             }
+
+        try:
+            check_and_consume(db, current_user, "skill_assessment")
+        except FeatureAccessDenied as exc:
+            raise HTTPException(status_code=402, detail=exc.payload)
 
         resume = None
         resume_skills: list[str] = []

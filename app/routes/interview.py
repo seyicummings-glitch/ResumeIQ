@@ -19,6 +19,7 @@ from app.services.ai_interviewer import get_interviewer_reply
 from app.services.interview_feedback import generate_interview_feedback
 from app.services.platform_settings import is_ai_enabled
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_INTERVIEW
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 
 router = APIRouter(prefix="/interview", tags=["Interview Practice"])
 
@@ -98,6 +99,13 @@ def post_interview_chat(
     session_id = get_session_id_from_request(request)
 
     if not conversation:
+        # Gated at the start of a session (not every turn, and not at save) so a denied
+        # user never gets partway through an interview before being blocked.
+        try:
+            check_and_consume(db, current_user, "interview_practice")
+        except FeatureAccessDenied as exc:
+            raise HTTPException(status_code=402, detail=exc.payload)
+
         # An empty conversation is the de facto "start" of an interview — there's no
         # explicit start/end handshake in this stateless, resend-the-transcript design.
         track_event(db, EVENT_TYPES["INTERVIEW_STARTED"], FEATURE_INTERVIEW, user_id=current_user.id,
