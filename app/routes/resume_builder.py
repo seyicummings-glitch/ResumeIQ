@@ -1,6 +1,6 @@
 import base64
 import binascii
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.services.resume_builder import generate_enhanced_resume, chat_about_resume
@@ -8,6 +8,8 @@ from app.services.resume_structurer import extract_skills_list
 from app.services.analysis_store import get_latest_analysis
 from app.services.platform_settings import is_ai_enabled
 from app.services.attachment_ai import analyze_attachment
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_AI_BUILDER
+from app.security import get_session_id_from_request
 from app.database import get_db
 from app.models.models import Resume, User
 from app.security import get_current_user
@@ -33,7 +35,8 @@ def _get_latest_active_resume(db: Session, user_id: int) -> Resume | None:
 @router.post("/generate")
 def generate_resume(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     resume = _get_latest_active_resume(db, current_user.id)
     if not resume:
@@ -57,6 +60,11 @@ def generate_resume(
         ai_enabled=is_ai_enabled(db),
     )
     result["resume_id"] = resume.id
+
+    track_event(
+        db, EVENT_TYPES["AI_RESUME_SUGGESTION_GENERATED"], FEATURE_AI_BUILDER, user_id=current_user.id,
+        metadata={"resume_id": resume.id}, request=request, session_id=get_session_id_from_request(request),
+    )
     return result
 
 
@@ -89,7 +97,8 @@ class ResumeBuilderChatInput(BaseModel):
 def chat_resume(
     data: ResumeBuilderChatInput,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """One turn of conversational resume building/editing. The frontend keeps the running
     transcript and current draft client-side and resends both in full each turn — no
@@ -101,6 +110,14 @@ def chat_resume(
     If an attachment came with this turn, it's analyzed once here (see attachment_ai.py — real
     vision for images/PDFs, extracted text for other documents) and folded into the last user
     message as extra context, rather than resent as binary on every future turn."""
+    if not data.conversation:
+        # An empty conversation is the de facto "start" of a builder session — there's no
+        # explicit start/end handshake in this stateless, resend-the-transcript design.
+        track_event(
+            db, EVENT_TYPES["AI_BUILDER_STARTED"], FEATURE_AI_BUILDER, user_id=current_user.id,
+            request=request, session_id=get_session_id_from_request(request),
+        )
+
     resume = _get_latest_active_resume(db, current_user.id)
     resume_text = ""
     missing_skills = []
@@ -167,7 +184,8 @@ class SaveEnhancedResumeInput(BaseModel):
 def save_enhanced_resume(
     data: SaveEnhancedResumeInput,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Saves the chat-built draft as a new resume version. resume_id is optional: if the draft
     was built entirely from scratch through conversation (no prior uploaded resume), there's no
@@ -179,6 +197,13 @@ def save_enhanced_resume(
         ).first()
         if not original:
             raise HTTPException(status_code=404, detail="Source resume not found.")
+
+    # Checked before inserting the new row below, to tell a user's first-ever AI
+    # build (ai_resume_created) from a later regeneration (ai_resume_regenerated).
+    has_prior_ai_build = (
+        db.query(Resume).filter(Resume.user_id == current_user.id, Resume.source == "ai_builder").first()
+        is not None
+    )
 
     experience_text = "\n".join(data.experience_bullets)
     raw_text = (
@@ -209,7 +234,11 @@ def save_enhanced_resume(
         projects=original.projects if original else None,
         version=new_version,
         label=f"v{new_version} (AI-enhanced)" if original else f"v{new_version} (AI-built)",
-        is_active=True
+        is_active=True,
+        # Distinguishes this from a plain uploaded resume (the "upload" default) — an existing
+        # gap meant totalAiResumeBuilds/related analytics always undercounted, since nothing
+        # ever set this explicitly despite the model supporting it.
+        source="ai_builder",
     )
 
     # Exactly one resume can be "active" per user — deactivate every other
@@ -219,6 +248,19 @@ def save_enhanced_resume(
     db.add(new_resume)
     db.commit()
     db.refresh(new_resume)
+
+    session_id = get_session_id_from_request(request)
+    event_metadata = {"resume_id": new_resume.id, "version": new_resume.version}
+    track_event(db, EVENT_TYPES["AI_RESUME_SAVED"], FEATURE_AI_BUILDER, user_id=current_user.id,
+                metadata=event_metadata, request=request, session_id=session_id)
+    track_event(db, EVENT_TYPES["AI_BUILDER_COMPLETED"], FEATURE_AI_BUILDER, user_id=current_user.id,
+                metadata=event_metadata, request=request, session_id=session_id)
+    if has_prior_ai_build:
+        track_event(db, EVENT_TYPES["AI_RESUME_REGENERATED"], FEATURE_AI_BUILDER, user_id=current_user.id,
+                    metadata=event_metadata, request=request, session_id=session_id)
+    else:
+        track_event(db, EVENT_TYPES["AI_RESUME_CREATED"], FEATURE_AI_BUILDER, user_id=current_user.id,
+                    metadata=event_metadata, request=request, session_id=session_id)
 
     return {
         "message": "Enhanced resume saved as a new version.",

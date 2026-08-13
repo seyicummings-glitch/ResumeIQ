@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.services.resume_parser import extract_resume_text
@@ -13,6 +13,8 @@ from app.services.writing_scorer import calculate_writing_score
 from app.services.readiness_scorer import calculate_hiring_readiness, explain_hiring_readiness
 from app.services.ai_suggestions import generate_resume_suggestions
 from app.services.platform_settings import is_ai_enabled
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_RESUME_ANALYZER
+from app.security import get_session_id_from_request
 from app.database import get_db
 from app.models.models import Resume, JobDescription, AnalysisResult, User
 from app.models.document_models import GeneratedDocument
@@ -89,7 +91,8 @@ class AnalysisSaveInput(BaseModel):
 def save_analysis(
     data: AnalysisSaveInput,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Recompute a resume-vs-JD match and persist it as an AnalysisResult, so
     downstream features (skill assessment, interview practice, learning
@@ -107,6 +110,10 @@ def save_analysis(
         ).first()
         if not job_description:
             raise HTTPException(status_code=404, detail="Job description not found.")
+
+        # Checked before inserting the new row below, so this reflects whether an
+        # analysis for this exact resume already existed prior to this call.
+        is_reanalysis = db.query(AnalysisResult).filter(AnalysisResult.resume_id == resume.id).first() is not None
 
         # Re-derive skills fresh from the resume's raw text on every analysis, rather
         # than trusting the `resume.skills` string stored at upload time — that stored
@@ -166,6 +173,26 @@ def save_analysis(
         db.add(analysis)
         db.commit()
         db.refresh(analysis)
+
+        session_id = get_session_id_from_request(request)
+        event_metadata = {
+            "analysis_id": analysis.id, "resume_id": resume.id,
+            "match_percentage": analysis.match_percentage,
+        }
+        track_event(
+            db, EVENT_TYPES["RESUME_ANALYZED"], FEATURE_RESUME_ANALYZER, user_id=current_user.id,
+            metadata=event_metadata, request=request, session_id=session_id,
+        )
+        track_event(
+            db, EVENT_TYPES["ATS_SCORE_GENERATED"], FEATURE_RESUME_ANALYZER, user_id=current_user.id,
+            metadata={"analysis_id": analysis.id, "ats_score": ats_result["overall_ats_score"]},
+            request=request, session_id=session_id,
+        )
+        if is_reanalysis:
+            track_event(
+                db, EVENT_TYPES["RESUME_REANALYZED"], FEATURE_RESUME_ANALYZER, user_id=current_user.id,
+                metadata=event_metadata, request=request, session_id=session_id,
+            )
 
         return {
             "message": "Analysis saved.",

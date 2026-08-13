@@ -1,12 +1,13 @@
 from urllib.parse import quote
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import AnalysisResult, Resume, JobDescription, User
 from app.services.pdf_report import generate_analysis_pdf
-from app.security import get_current_user
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_DOCUMENTS
+from app.security import get_current_user, get_session_id_from_request
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -32,13 +33,16 @@ class DocumentGenerateInput(BaseModel):
 def generate_document(
     data: DocumentGenerateInput,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Generates a PDF report for an analysis on demand — called from the "Download PDF
     report" action on Analysis History / Analysis Results. Generated fresh every time rather
     than stored: the standalone Documents page (a saved-file archive) was removed since it only
     ever duplicated this same download, so there's no reason to keep a database record around
-    that nothing lists or manages anymore."""
+    that nothing lists or manages anymore. Both document_generated and document_downloaded fire
+    here since, in this architecture, generating a document IS downloading it — there's no
+    separate "save for later, download whenever" step."""
     try:
         analysis = db.query(AnalysisResult).filter(
             AnalysisResult.id == data.analysis_id, AnalysisResult.user_id == current_user.id
@@ -57,6 +61,13 @@ def generate_document(
             resume_filename=resume_filename,
             jd_title=jd_title,
         )
+
+        session_id = get_session_id_from_request(request)
+        event_metadata = {"analysis_id": analysis.id, "doc_type": "analysis-report"}
+        track_event(db, EVENT_TYPES["DOCUMENT_GENERATED"], FEATURE_DOCUMENTS, user_id=current_user.id,
+                    metadata=event_metadata, request=request, session_id=session_id)
+        track_event(db, EVENT_TYPES["DOCUMENT_DOWNLOADED"], FEATURE_DOCUMENTS, user_id=current_user.id,
+                    metadata=event_metadata, request=request, session_id=session_id)
 
         return _pdf_response(pdf_bytes, f"{resume_filename} — {jd_title} Report.pdf")
     except ValueError as e:

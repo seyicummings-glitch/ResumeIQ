@@ -1,12 +1,12 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import Resume, JobDescription, User
 from app.models.interview_models import InterviewSession
-from app.security import get_current_user
+from app.security import get_current_user, get_session_id_from_request
 from app.services.analysis_store import get_latest_analysis
 from app.services.resume_structurer import extract_skills_list
 from app.services.interview_questions import (
@@ -18,6 +18,7 @@ from app.services.interview_questions import (
 from app.services.ai_interviewer import get_interviewer_reply
 from app.services.interview_feedback import generate_interview_feedback
 from app.services.platform_settings import is_ai_enabled
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_INTERVIEW
 
 router = APIRouter(prefix="/interview", tags=["Interview Practice"])
 
@@ -73,13 +74,15 @@ class InterviewChatMessage(BaseModel):
 class InterviewChatInput(BaseModel):
     conversation: list[InterviewChatMessage] = []
     preferred_language: str | None = None
+    mode: str | None = None  # "voice" | "text" — only meaningful/known on the first turn
 
 
 @router.post("/chat")
 def post_interview_chat(
     data: InterviewChatInput,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Turn-by-turn AI mock interview. The frontend keeps the running
     transcript client-side and resends it in full each turn — no server-side
@@ -92,6 +95,22 @@ def post_interview_chat(
         )
 
     conversation = [m.model_dump() for m in data.conversation]
+    session_id = get_session_id_from_request(request)
+
+    if not conversation:
+        # An empty conversation is the de facto "start" of an interview — there's no
+        # explicit start/end handshake in this stateless, resend-the-transcript design.
+        track_event(db, EVENT_TYPES["INTERVIEW_STARTED"], FEATURE_INTERVIEW, user_id=current_user.id,
+                    metadata={"mode": data.mode}, request=request, session_id=session_id)
+        if data.mode == "voice":
+            track_event(db, EVENT_TYPES["VOICE_INTERVIEW_STARTED"], FEATURE_INTERVIEW, user_id=current_user.id,
+                        request=request, session_id=session_id)
+        elif data.mode == "text":
+            track_event(db, EVENT_TYPES["TEXT_INTERVIEW_STARTED"], FEATURE_INTERVIEW, user_id=current_user.id,
+                        request=request, session_id=session_id)
+    else:
+        track_event(db, EVENT_TYPES["FOLLOWUP_GENERATED"], FEATURE_INTERVIEW, user_id=current_user.id,
+                    metadata={"turn": len(conversation)}, request=request, session_id=session_id)
 
     result = get_interviewer_reply(
         resume_text=context["resume_text"],
@@ -111,8 +130,10 @@ def post_interview_chat(
 async def save_interview_session(
     transcript: str = Form(...),
     audio: UploadFile | None = File(None),
+    mode: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Called once, when a voice interview ends: persists the transcript and
     recorded audio (if the browser supported capturing it), and generates a
@@ -154,6 +175,20 @@ async def save_interview_session(
     db.add(session)
     db.commit()
     db.refresh(session)
+
+    session_id = get_session_id_from_request(request)
+    # `mode` reflects what the frontend was actually running (falls back to inferring
+    # from audio presence for older clients that don't send it explicitly).
+    resolved_mode = mode or ("voice" if audio_bytes is not None else "text")
+    track_event(
+        db, EVENT_TYPES["INTERVIEW_COMPLETED"], FEATURE_INTERVIEW, user_id=current_user.id,
+        metadata={"session_id": session.id, "mode": resolved_mode, "has_audio": audio_bytes is not None},
+        request=request, session_id=session_id,
+    )
+    track_event(
+        db, EVENT_TYPES["INTERVIEW_FEEDBACK_GENERATED"], FEATURE_INTERVIEW, user_id=current_user.id,
+        metadata={"session_id": session.id}, request=request, session_id=session_id,
+    )
 
     return {
         "id": session.id,

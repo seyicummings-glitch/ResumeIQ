@@ -98,3 +98,20 @@ def require_admin(current_user = Depends(get_current_user)):
             detail="Admin access required"
         )
     return current_user
+
+
+def get_session_id_from_request(request) -> str | None:
+    """Best-effort peek at the bearer token's "session_id" claim (set at login,
+    see auth.py's login()) for analytics tracking — never raises, returns None
+    for a missing/malformed/expired token rather than rejecting the request,
+    since this is only ever used to enrich an analytics event, not to gate
+    access. Decoupled from get_current_user() so it has zero effect on that
+    dependency's existing behavior/contract."""
+    if request is None:
+        return None
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    payload = decode_access_token(token)
+    return payload.get("session_id") if payload else None

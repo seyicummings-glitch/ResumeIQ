@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from app.services.resume_parser import extract_resume_text
@@ -8,6 +8,8 @@ from app.services.ai_suggestions import generate_resume_suggestions
 from app.services.job_description_parser import parse_job_description, derive_job_title
 from app.services.keyword_analyzer import analyze_keywords
 from app.services.platform_settings import get_upload_limits, is_ai_enabled
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_RESUME_ANALYZER, FEATURE_AI_BUILDER
+from app.security import get_session_id_from_request
 from app.database import get_db
 from app.models.models import Resume, User, AnalysisResult, JobDescription
 from app.security import get_current_user
@@ -141,7 +143,8 @@ async def ai_suggestions_resume(
 async def save_resume(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     try:
         file_bytes = await file.read()
@@ -165,6 +168,12 @@ async def save_resume(
         db.add(new_resume)
         db.commit()
         db.refresh(new_resume)
+
+        track_event(
+            db, EVENT_TYPES["RESUME_UPLOADED"], FEATURE_RESUME_ANALYZER, user_id=current_user.id,
+            metadata={"resume_id": new_resume.id, "filename": new_resume.filename},
+            request=request, session_id=get_session_id_from_request(request),
+        )
 
         return {
             "message": "Resume saved successfully.",
@@ -322,11 +331,23 @@ def compare_resume_versions(
 def download_resume(
     resume_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     resume = db.query(Resume).filter(Resume.id == resume_id, Resume.user_id == current_user.id).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found.")
+
+    track_event(
+        db, EVENT_TYPES["RESUME_DOWNLOADED"], FEATURE_RESUME_ANALYZER, user_id=current_user.id,
+        metadata={"resume_id": resume.id, "source": resume.source}, request=request,
+        session_id=get_session_id_from_request(request),
+    )
+    if resume.source == "ai_builder":
+        track_event(
+            db, EVENT_TYPES["AI_RESUME_DOWNLOADED"], FEATURE_AI_BUILDER, user_id=current_user.id,
+            metadata={"resume_id": resume.id}, request=request, session_id=get_session_id_from_request(request),
+        )
 
     if resume.file_data is not None:
         return Response(

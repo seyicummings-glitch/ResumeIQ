@@ -1,6 +1,7 @@
-﻿from datetime import datetime, timezone
+﻿import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -25,13 +26,14 @@ from app.security import (
     require_admin,
     normalize_email,
 )
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_AUTH
 from app.services.email_service import is_email_configured, send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/register", response_model=UserResponse)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+def register(user: UserCreate, db: Session = Depends(get_db), request: Request = None):
     email = normalize_email(user.email)
     existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
@@ -52,11 +54,13 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=400, detail="Email already registered")
     db.refresh(new_user)
+
+    track_event(db, EVENT_TYPES["USER_REGISTERED"], FEATURE_AUTH, user_id=new_user.id, request=request)
     return new_user
 
 
 @router.post("/login", response_model=Token)
-def login(credentials: UserLogin, db: Session = Depends(get_db)):
+def login(credentials: UserLogin, db: Session = Depends(get_db), request: Request = None):
     user = db.query(User).filter(User.email == normalize_email(credentials.email)).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(
@@ -73,7 +77,13 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
 
-    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    # A fresh session_id per login, embedded in the token itself (stateless — no
+    # session table) so every request during this login "session" can be
+    # correlated in analytics without the client doing anything extra.
+    session_id = str(uuid.uuid4())
+    access_token = create_access_token(data={"sub": str(user.id), "email": user.email, "session_id": session_id})
+
+    track_event(db, EVENT_TYPES["USER_LOGIN"], FEATURE_AUTH, user_id=user.id, request=request, session_id=session_id)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -86,7 +96,8 @@ def get_me(current_user: User = Depends(get_current_user)):
 def update_me(
     data: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     if data.email is not None and normalize_email(data.email) != current_user.email:
         new_email = normalize_email(data.email)
@@ -101,6 +112,11 @@ def update_me(
 
     db.commit()
     db.refresh(current_user)
+
+    track_event(
+        db, EVENT_TYPES["PROFILE_UPDATED"], FEATURE_AUTH, user_id=current_user.id,
+        metadata={"fields": sorted(profile_fields.keys())}, request=request,
+    )
     return current_user
 
 
@@ -120,7 +136,8 @@ def change_password(
 
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user)):
+def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db), request: Request = None):
+    track_event(db, EVENT_TYPES["USER_LOGOUT"], FEATURE_AUTH, user_id=current_user.id, request=request)
     return {"message": "Successfully logged out. Please discard your access token."}
 
 
@@ -149,7 +166,7 @@ def request_password_reset(data: PasswordResetRequest, db: Session = Depends(get
 
 
 @router.post("/password-reset/confirm")
-def confirm_password_reset(data: PasswordResetConfirm, db: Session = Depends(get_db)):
+def confirm_password_reset(data: PasswordResetConfirm, db: Session = Depends(get_db), request: Request = None):
     email = verify_password_reset_token(data.token)
     if not email:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
@@ -161,6 +178,7 @@ def confirm_password_reset(data: PasswordResetConfirm, db: Session = Depends(get
     user.hashed_password = hash_password(data.new_password)
     db.commit()
 
+    track_event(db, EVENT_TYPES["PASSWORD_RESET"], FEATURE_AUTH, user_id=user.id, request=request)
     return {"message": "Password has been reset successfully."}
 
 

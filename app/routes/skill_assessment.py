@@ -1,17 +1,18 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import JobDescription, Resume, User
 from app.models.skill_assessment_models import SkillAssessmentAttempt, SkillAssessmentSession, SkillQuestion
-from app.security import get_current_user
+from app.security import get_current_user, get_session_id_from_request
 from app.services.analysis_store import get_latest_analysis
 from app.services.resume_structurer import extract_skills_list
 from app.services.platform_settings import is_ai_enabled
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_SKILL_ASSESSMENT
 from app.services.skill_assessment import (
     DIFFICULTY_WEIGHT,
     MAX_TOTAL_COUNT,
@@ -191,6 +192,7 @@ def build_skill_assessment(
     question_count: int = Query(DEFAULT_TOTAL_COUNT, ge=MIN_TOTAL_COUNT, le=MAX_TOTAL_COUNT),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     try:
         analysis = get_latest_analysis(db, current_user.id)
@@ -242,6 +244,12 @@ def build_skill_assessment(
         db.add(session)
         db.commit()
         db.refresh(session)
+
+        track_event(
+            db, EVENT_TYPES["ASSESSMENT_STARTED"], FEATURE_SKILL_ASSESSMENT, user_id=current_user.id,
+            metadata={"session_id": session.id, "source": session.source, "question_count": len(question_set["questions"])},
+            request=request, session_id=get_session_id_from_request(request),
+        )
 
         return {
             "session_id": session.id,
@@ -299,6 +307,7 @@ def submit_skill_assessment(
     data: AssessmentSubmitInput,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     try:
         session = db.query(SkillAssessmentSession).filter(
@@ -430,6 +439,25 @@ def submit_skill_assessment(
         db.add(attempt)
         db.commit()
         db.refresh(attempt)
+
+        session_id = get_session_id_from_request(request)
+        for feedback_item in question_feedback:
+            track_event(
+                db, EVENT_TYPES["QUESTION_ANSWERED"], FEATURE_SKILL_ASSESSMENT, user_id=current_user.id,
+                metadata={
+                    "attempt_id": attempt.id, "question_id": feedback_item["question_id"],
+                    "type": feedback_item["type"], "is_correct": feedback_item["is_correct"],
+                },
+                request=request, session_id=session_id,
+            )
+        attempt_metadata = {
+            "attempt_id": attempt.id, "technical_score": technical_score,
+            "soft_score": soft_score, "overall_score": final_score,
+        }
+        track_event(db, EVENT_TYPES["ASSESSMENT_COMPLETED"], FEATURE_SKILL_ASSESSMENT, user_id=current_user.id,
+                    metadata=attempt_metadata, request=request, session_id=session_id)
+        track_event(db, EVENT_TYPES["ASSESSMENT_SCORED"], FEATURE_SKILL_ASSESSMENT, user_id=current_user.id,
+                    metadata=attempt_metadata, request=request, session_id=session_id)
 
         return {
             "technical_score": technical_score,

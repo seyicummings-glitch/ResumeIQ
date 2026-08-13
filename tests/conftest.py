@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 # Import every model module so their tables register on Base.metadata before create_all.
-from app.models import models, admin_models, document_models, interview_models, roadmap_models, skill_assessment_models, ai_conversation_models, subscription_models, skill_resource_models  # noqa: F401
+from app.models import models, admin_models, document_models, interview_models, roadmap_models, skill_assessment_models, ai_conversation_models, subscription_models, skill_resource_models, analytics_models  # noqa: F401
 
 
 @pytest.fixture

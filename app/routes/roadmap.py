@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -7,13 +7,14 @@ from app.models.models import JobDescription, Resume, User
 from app.models.roadmap_models import LearningRoadmap, RoadmapTopicProgress
 from app.models.skill_assessment_models import SkillAssessmentAttempt
 from app.models.interview_models import InterviewSession
-from app.security import get_current_user
+from app.security import get_current_user, get_session_id_from_request
 from app.services.analysis_store import get_latest_analysis
 from app.services.resume_structurer import extract_skills_list
 from app.services.platform_settings import is_ai_enabled
 from app.services.learning_roadmap import build_roadmap, detect_profession_category
 from app.services.learning_roadmap_ai import generate_learning_roadmap
 from app.services.skill_resources import fetch_all_resources, get_resource_links
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_ROADMAP
 
 router = APIRouter(prefix="/roadmap", tags=["Learning Roadmap"])
 
@@ -60,7 +61,7 @@ def _assign_topic_keys(stages: list[dict]) -> list[dict]:
     return stages
 
 
-def _generate_and_save_roadmap(db: Session, current_user: User) -> LearningRoadmap:
+def _generate_and_save_roadmap(db: Session, current_user: User, request: Request = None) -> LearningRoadmap:
     analysis = get_latest_analysis(db, current_user.id)
 
     resume_text = ""
@@ -115,6 +116,12 @@ def _generate_and_save_roadmap(db: Session, current_user: User) -> LearningRoadm
     db.add(roadmap)
     db.commit()
     db.refresh(roadmap)
+
+    track_event(
+        db, EVENT_TYPES["ROADMAP_GENERATED"], FEATURE_ROADMAP, user_id=current_user.id,
+        metadata={"roadmap_id": roadmap.id, "source": source, "detected_profession": roadmap.detected_profession},
+        request=request, session_id=get_session_id_from_request(request),
+    )
     return roadmap
 
 
@@ -174,6 +181,7 @@ def _serialize_roadmap(db: Session, roadmap: LearningRoadmap, user_id: int) -> d
 def get_roadmap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     try:
         analysis = get_latest_analysis(db, current_user.id)
@@ -187,7 +195,7 @@ def get_roadmap(
             .first()
         )
         if not roadmap:
-            roadmap = _generate_and_save_roadmap(db, current_user)
+            roadmap = _generate_and_save_roadmap(db, current_user, request)
 
         return {"has_context": True, "roadmap": _serialize_roadmap(db, roadmap, current_user.id)}
     except ValueError as e:
@@ -202,6 +210,7 @@ def get_roadmap(
 def regenerate_roadmap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     try:
         analysis = get_latest_analysis(db, current_user.id)
@@ -211,7 +220,7 @@ def regenerate_roadmap(
                 detail="Set a target role in your profile or save an analysis first so the roadmap has context to build from.",
             )
 
-        roadmap = _generate_and_save_roadmap(db, current_user)
+        roadmap = _generate_and_save_roadmap(db, current_user, request)
         return {"has_context": True, "roadmap": _serialize_roadmap(db, roadmap, current_user.id)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -230,6 +239,7 @@ def toggle_roadmap_topic(
     data: RoadmapToggleInput,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     try:
         roadmap = (
@@ -257,6 +267,19 @@ def toggle_roadmap_topic(
         db.commit()
         db.refresh(row)
 
+        if row.completed:
+            total_topics = sum(len(stage["topics"]) for stage in roadmap.stages_json)
+            completed_topics = (
+                db.query(RoadmapTopicProgress)
+                .filter(RoadmapTopicProgress.roadmap_id == roadmap.id, RoadmapTopicProgress.completed == True)  # noqa: E712
+                .count()
+            )
+            if total_topics > 0 and completed_topics >= total_topics:
+                track_event(
+                    db, EVENT_TYPES["ROADMAP_COMPLETED"], FEATURE_ROADMAP, user_id=current_user.id,
+                    metadata={"roadmap_id": roadmap.id}, request=request, session_id=get_session_id_from_request(request),
+                )
+
         return {"topic_key": data.topic_key, "completed": row.completed}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -264,3 +287,41 @@ def toggle_roadmap_topic(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating roadmap progress: {str(e)}")
+
+
+_RESOURCE_CLICK_EVENTS = {
+    "video": EVENT_TYPES["YOUTUBE_RESOURCE_OPENED"],
+    "course": EVENT_TYPES["COURSE_OPENED"],
+    "docs": EVENT_TYPES["DOCUMENTATION_OPENED"],
+    "skill": EVENT_TYPES["SKILL_VIEWED"],
+}
+
+
+class ResourceClickInput(BaseModel):
+    resource_type: str  # "video" | "course" | "docs" | "skill"
+    skill_title: str
+    url: str | None = None
+
+
+@router.post("/track-resource-click")
+def track_resource_click(
+    data: ResourceClickInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    """Fire-and-forget beacon the frontend calls when a user opens a roadmap
+    resource (a video, course, docs link) or expands a topic to view it —
+    these have no other backend round-trip (the frontend renders plain <a>
+    links directly to the resource URL), so without this call there would be
+    no way to know which resources users actually engage with."""
+    event_type = _RESOURCE_CLICK_EVENTS.get(data.resource_type)
+    if not event_type:
+        raise HTTPException(status_code=400, detail=f"Unknown resource_type '{data.resource_type}'.")
+
+    track_event(
+        db, event_type, FEATURE_ROADMAP, user_id=current_user.id,
+        metadata={"skill": data.skill_title, "url": data.url},
+        request=request, session_id=get_session_id_from_request(request),
+    )
+    return {"tracked": True}
