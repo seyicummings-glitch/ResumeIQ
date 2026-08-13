@@ -49,6 +49,20 @@ SECTION_HEADERS = {
         "projekte",
         "projetos", "projetos pessoais",
     ],
+    "languages": [
+        "languages", "language skills", "language proficiency",
+        "langues", "compétences linguistiques",
+        "idiomas", "competencias lingüísticas",
+        "sprachen", "sprachkenntnisse",
+        "competências linguísticas",
+    ],
+    "references": [
+        "references", "professional references", "referees",
+        "références",
+        "referencias",
+        "referenzen",
+        "referências",
+    ],
 }
 
 _MAX_HEADER_LINE_LENGTH = 50
@@ -171,4 +185,6 @@ def structure_resume(text: str) -> dict:
         "education": sections.get("education", ""),
         "certifications": sections.get("certifications", ""),
         "projects": sections.get("projects", ""),
+        "languages": sections.get("languages", ""),
+        "references": sections.get("references", ""),
     }

@@ -71,6 +71,18 @@ def test_experience_section_with_numbering_is_recognized():
     assert "BSc Computer Science" in result["education"]
 
 
+def test_languages_and_references_sections_are_recognized():
+    text = (
+        "Summary\nEngineer.\n\n"
+        "Skills\nPython\n\n"
+        "Languages\nSpanish - Fluent\nFrench - Conversational\n\n"
+        "References\nJane Doe, Manager at Acme, jane@acme.com\n"
+    )
+    result = structure_resume(text)
+    assert "Spanish - Fluent" in result["languages"]
+    assert "Jane Doe" in result["references"]
+
+
 def test_long_line_mentioning_a_header_word_is_not_treated_as_a_header():
     text = (
         "Summary\n"

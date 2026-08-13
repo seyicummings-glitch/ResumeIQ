@@ -6,6 +6,7 @@ def _user(db_session, **overrides):
     fields = dict(
         email="jordan@example.com", hashed_password="x", full_name="Jordan Mitchell",
         phone="+1 (555) 123-4567", linkedin_url="linkedin.com/in/jordanmitchell", location="Austin, TX",
+        portfolio_url="jordanmitchell.dev",
     )
     fields.update(overrides)
     user = User(**fields)
@@ -35,12 +36,13 @@ def test_generate_resume_merges_real_contact_info_from_profile(db_session):
 
     assert result["contact"] == {
         "full_name": "Jordan Mitchell", "email": "jordan@example.com",
-        "phone": "+1 (555) 123-4567", "linkedin": "linkedin.com/in/jordanmitchell", "location": "Austin, TX",
+        "phone": "+1 (555) 123-4567", "linkedin": "linkedin.com/in/jordanmitchell",
+        "location": "Austin, TX", "portfolio": "jordanmitchell.dev",
     }
 
 
 def test_generate_resume_contact_handles_missing_profile_fields_gracefully(db_session):
-    user = _user(db_session, phone=None, linkedin_url=None, location=None)
+    user = _user(db_session, phone=None, linkedin_url=None, location=None, portfolio_url=None)
     _resume(db_session, user)
 
     result = routes.generate_resume(db=db_session, current_user=user)
@@ -48,6 +50,7 @@ def test_generate_resume_contact_handles_missing_profile_fields_gracefully(db_se
     assert result["contact"]["phone"] == ""
     assert result["contact"]["linkedin"] == ""
     assert result["contact"]["location"] == ""
+    assert result["contact"]["portfolio"] == ""
     assert result["contact"]["email"] == "jordan@example.com"
 
 
@@ -67,7 +70,7 @@ def test_save_enhanced_resume_builds_formatted_raw_text_with_header_and_sections
     data = routes.SaveEnhancedResumeInput(
         title="Marketing & Sales Professional",
         summary="Results-driven marketing professional.",
-        skills=["SEO", "CRM", "Negotiation"],
+        skills=routes.SkillsInput(technical=["SEO", "CRM"], soft=["Negotiation"]),
         experience=[routes.ExperienceItemInput(
             title="Senior Marketing Manager", company="Brightline Consumer Goods Co.",
             start_date="Mar 2022", end_date="Present",
@@ -75,6 +78,11 @@ def test_save_enhanced_resume_builds_formatted_raw_text_with_header_and_sections
         )],
         education=[routes.EducationItemInput(degree="BBA, Marketing", school="University of Texas at Austin", date="May 2017")],
         certifications=["HubSpot Inbound Marketing Certification"],
+        projects=[routes.ProjectItemInput(
+            name="Brand Relaunch Campaign", description="Led a full brand relaunch.",
+            technologies=["HubSpot", "Google Analytics"], bullets=["Increased site traffic by 60%."],
+        )],
+        languages=[routes.LanguageItemInput(name="Spanish", proficiency="Fluent")],
     )
 
     result = routes.save_enhanced_resume(data, db=db_session, current_user=user)
@@ -84,20 +92,33 @@ def test_save_enhanced_resume_builds_formatted_raw_text_with_header_and_sections
     assert "Jordan Mitchell" in saved.raw_text
     assert "Marketing & Sales Professional" in saved.raw_text
     assert "jordan@example.com" in saved.raw_text
+    assert "jordanmitchell.dev" in saved.raw_text
     assert "PROFESSIONAL SUMMARY" in saved.raw_text
-    assert "CORE SKILLS" in saved.raw_text
-    assert "SEO • CRM • Negotiation" in saved.raw_text
-    assert "PROFESSIONAL EXPERIENCE" in saved.raw_text
-    assert "Senior Marketing Manager | Brightline Consumer Goods Co." in saved.raw_text
+    assert "SKILLS" in saved.raw_text
+    assert "Technical Skills:" in saved.raw_text
+    assert "SEO" in saved.raw_text
+    assert "Soft Skills:" in saved.raw_text
+    assert "Negotiation" in saved.raw_text
+    assert "WORK EXPERIENCE" in saved.raw_text
+    assert "Brightline Consumer Goods Co." in saved.raw_text
+    assert "Senior Marketing Manager" in saved.raw_text
     assert "Led a cross-functional team of 8." in saved.raw_text
     assert "EDUCATION" in saved.raw_text
     assert "BBA, Marketing, University of Texas at Austin (May 2017)" in saved.raw_text
     assert "CERTIFICATIONS" in saved.raw_text
     assert "HubSpot Inbound Marketing Certification" in saved.raw_text
+    assert "PROJECTS" in saved.raw_text
+    assert "Brand Relaunch Campaign" in saved.raw_text
+    assert "Technologies Used: HubSpot, Google Analytics" in saved.raw_text
+    assert "Results Achieved:" in saved.raw_text
+    assert "Increased site traffic by 60%." in saved.raw_text
+    assert "LANGUAGES" in saved.raw_text
+    assert "Spanish" in saved.raw_text
 
     assert saved.skills == "SEO, CRM, Negotiation"
     assert "University of Texas at Austin" in saved.education
     assert "HubSpot Inbound Marketing Certification" in saved.certifications
+    assert "Brand Relaunch Campaign" in saved.projects
 
 
 def test_save_enhanced_resume_falls_back_to_original_education_when_draft_has_none(db_session):
@@ -106,7 +127,7 @@ def test_save_enhanced_resume_falls_back_to_original_education_when_draft_has_no
 
     data = routes.SaveEnhancedResumeInput(
         resume_id=original.id, title="Engineer", summary="Summary.",
-        skills=["Python"], experience=[], education=[], certifications=[],
+        skills=routes.SkillsInput(technical=["Python"]), experience=[], education=[], certifications=[],
     )
     result = routes.save_enhanced_resume(data, db=db_session, current_user=user)
     saved = db_session.query(Resume).filter(Resume.id == result["resume_id"]).first()
@@ -120,7 +141,7 @@ def test_save_enhanced_resume_draft_education_takes_precedence_over_original(db_
     original = _resume(db_session, user, education="Stale old degree")
 
     data = routes.SaveEnhancedResumeInput(
-        resume_id=original.id, title="Engineer", summary="Summary.", skills=[], experience=[],
+        resume_id=original.id, title="Engineer", summary="Summary.", skills=routes.SkillsInput(), experience=[],
         education=[routes.EducationItemInput(degree="MSc Data Science", school="Stanford", date="2023")],
         certifications=[],
     )
@@ -129,3 +150,17 @@ def test_save_enhanced_resume_draft_education_takes_precedence_over_original(db_
 
     assert "MSc Data Science" in saved.education
     assert "Stale old degree" not in saved.education
+
+
+def test_save_enhanced_resume_no_projects_falls_back_to_original(db_session):
+    user = _user(db_session)
+    original = _resume(db_session, user, projects="Old side project")
+
+    data = routes.SaveEnhancedResumeInput(
+        resume_id=original.id, title="Engineer", summary="Summary.", skills=routes.SkillsInput(),
+        experience=[], education=[], certifications=[], projects=[],
+    )
+    result = routes.save_enhanced_resume(data, db=db_session, current_user=user)
+    saved = db_session.query(Resume).filter(Resume.id == result["resume_id"]).first()
+
+    assert saved.projects == "Old side project"
