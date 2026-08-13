@@ -1,0 +1,362 @@
+[
+  {
+    "category_key": "react",
+    "category_label": "React",
+    "difficulty": "beginner",
+    "question": "In React, what is the correct way to update state based on the previous state value?",
+    "options": [
+      "setCount(count + 1)",
+      "setCount(prevCount => prevCount + 1)",
+      "count = count + 1",
+      "this.state.count++"
+    ],
+    "correct_index": 1,
+    "explanation": "Using the functional updater form guarantees you're working off the latest state value, which avoids stale-closure bugs when multiple state updates are batched together.",
+    "tip": "Prefer the functional updater form (prev => ...) whenever the new state depends on the previous state, not just for correctness now but to future-proof against batching changes."
+  },
+  {
+    "category_key": "react",
+    "category_label": "React",
+    "difficulty": "intermediate",
+    "question": "What is the purpose of the dependency array in React's useEffect hook?",
+    "options": [
+      "It lists the props that are required for the component to render",
+      "It tells React which values, when changed, should cause the effect to re-run",
+      "It defines which child components should re-render",
+      "It sets the order in which multiple effects run"
+    ],
+    "correct_index": 1,
+    "explanation": "React compares the dependency array's values between renders; if any changed, it re-runs the effect. An empty array means the effect only runs once, after the initial mount.",
+    "tip": "Always include every value from component scope that's referenced inside the effect to avoid stale-closure bugs; let eslint-plugin-react-hooks's exhaustive-deps rule catch missing dependencies."
+  },
+  {
+    "category_key": "react",
+    "category_label": "React",
+    "difficulty": "advanced",
+    "question": "Why might using an array index as the `key` prop cause bugs when a list's items can be reordered, inserted, or removed?",
+    "options": [
+      "React will throw a runtime error and crash",
+      "React can mismatch state and DOM elements to the wrong item because the key no longer maps to the same logical item",
+      "It disables React's virtual DOM diffing entirely",
+      "It forces a full page reload on every update"
+    ],
+    "correct_index": 1,
+    "explanation": "React uses keys to match elements between renders. If an index-based key stays the same while the underlying item at that index changes, React can reuse the wrong DOM node or component state — for example, an input keeps its old typed value after the list is reordered.",
+    "tip": "Use a stable, unique identifier from the data itself (like a database id) as the key instead of the array index whenever the list's order or membership can change."
+  },
+  {
+    "category_key": "javascript",
+    "category_label": "JavaScript",
+    "difficulty": "beginner",
+    "question": "What is the difference between `==` and `===` in JavaScript?",
+    "options": [
+      "There is no difference, they behave identically",
+      "`==` compares values after type coercion, `===` compares both value and type without coercion",
+      "`===` can only be used for comparing strings",
+      "`==` is a newer syntax that replaced `===`"
+    ],
+    "correct_index": 1,
+    "explanation": "`==` (loose equality) converts operands to a common type before comparing, which can cause surprising results such as `'1' == 1` being true, while `===` (strict equality) requires both the type and value to match.",
+    "tip": "Default to `===`/`!==` in your code to avoid subtle type-coercion bugs; only reach for `==` when coercion is explicitly what you want (and even then, prefer being explicit)."
+  },
+  {
+    "category_key": "javascript",
+    "category_label": "JavaScript",
+    "difficulty": "intermediate",
+    "question": "What does `console.log(typeof null)` output in JavaScript?",
+    "options": [
+      "'null'",
+      "'undefined'",
+      "'object'",
+      "'boolean'"
+    ],
+    "correct_index": 2,
+    "explanation": "This is a long-standing JavaScript quirk preserved for backward compatibility: `typeof null` returns `'object'` even though `null` is actually a primitive value, not an object.",
+    "tip": "Never rely on `typeof` to detect null — check explicitly with `value === null` instead."
+  },
+  {
+    "category_key": "javascript",
+    "category_label": "JavaScript",
+    "difficulty": "advanced",
+    "question": "If a `.then()` handler in a JavaScript Promise chain doesn't explicitly return a value, what happens to the next `.then()` in the chain?",
+    "options": [
+      "The promise chain stays pending forever",
+      "It resolves the next `.then()` with `undefined`",
+      "It throws a TypeError immediately",
+      "It automatically forwards the previous resolved value unchanged"
+    ],
+    "correct_index": 1,
+    "explanation": "Every `.then()` handler produces a new promise. If the handler doesn't return anything, that new promise resolves with `undefined`, and that `undefined` is what gets passed into the next `.then()` in the chain.",
+    "tip": "Always `return` a value (or another promise) inside `.then()` handlers when chaining multiple steps, otherwise later steps will silently receive `undefined`."
+  },
+  {
+    "category_key": "typescript",
+    "category_label": "TypeScript",
+    "difficulty": "beginner",
+    "question": "What is the main benefit of TypeScript's static typing compared to plain JavaScript?",
+    "options": [
+      "It makes compiled code run faster at runtime",
+      "It catches type-related errors at compile time instead of at runtime",
+      "It completely replaces the need for automated testing",
+      "It automatically reduces the final bundle size"
+    ],
+    "correct_index": 1,
+    "explanation": "TypeScript adds a compile-time type checker on top of JavaScript. It doesn't change runtime performance, but it surfaces mismatched types, typos, and missing properties before the code ever runs, catching a whole class of bugs earlier.",
+    "tip": "Enable `strict` mode in tsconfig.json as early as possible in a project — retrofitting it onto a large, already-loose codebase later is much more painful."
+  },
+  {
+    "category_key": "typescript",
+    "category_label": "TypeScript",
+    "difficulty": "intermediate",
+    "question": "How does an `interface` differ from a `type` alias in TypeScript, and where do they overlap?",
+    "options": [
+      "Interfaces support declaration merging (re-opening the same name to add members) while type aliases don't; both can describe object shapes",
+      "Interfaces can describe union types but type aliases cannot",
+      "Type aliases only work with primitive types like string and number",
+      "There is no functional difference between them in any case"
+    ],
+    "correct_index": 0,
+    "explanation": "Both `interface` and `type` can describe the shape of an object, but interfaces support declaration merging and are generally more idiomatic for describing public API shapes, while `type` is required for unions, tuples, and mapped/conditional types.",
+    "tip": "Use `interface` for object shapes you expect to be extended or implemented, and `type` for unions, intersections, and other type compositions interfaces can't express."
+  },
+  {
+    "category_key": "typescript",
+    "category_label": "TypeScript",
+    "difficulty": "advanced",
+    "question": "What does the built-in utility type `Partial<T>` do?",
+    "options": [
+      "Makes every property of T required",
+      "Makes every property of T optional",
+      "Removes all methods from T, leaving only data fields",
+      "Creates a readonly version of T"
+    ],
+    "correct_index": 1,
+    "explanation": "`Partial<T>` maps over every key of `T` and marks it optional with `?`, which is especially useful for things like patch/update payloads where only a subset of fields is supplied.",
+    "tip": "Combine `Partial<T>` with `Pick<T, K>` or `Omit<T, K>` to precisely shape update/DTO types instead of hand-writing a parallel interface for every variation."
+  },
+  {
+    "category_key": "python",
+    "category_label": "Python",
+    "difficulty": "beginner",
+    "question": "Which of the following correctly creates a list of each number in `nums` squared, using a list comprehension?",
+    "options": [
+      "[x**2 for x in nums]",
+      "for x in nums: x**2",
+      "[x**2 in nums]",
+      "list(x**2, nums)"
+    ],
+    "correct_index": 0,
+    "explanation": "List comprehensions use the syntax `[expression for item in iterable]`. `[x**2 for x in nums]` builds a new list containing each element of `nums` squared.",
+    "tip": "Reach for list comprehensions for simple transforms and filters — they're more idiomatic Python and usually faster than an equivalent manual for-loop with repeated `.append()` calls."
+  },
+  {
+    "category_key": "python",
+    "category_label": "Python",
+    "difficulty": "intermediate",
+    "question": "What is the key difference between a Python list and a tuple?",
+    "options": [
+      "Lists can only hold numbers, tuples can hold any type",
+      "Tuples are immutable, lists are mutable",
+      "Lists are always faster to iterate over than tuples",
+      "Tuples cannot be indexed with square brackets"
+    ],
+    "correct_index": 1,
+    "explanation": "Once created, a tuple's contents can't be changed (immutable), while a list supports in-place modification such as append, remove, or item assignment. This immutability is also what lets tuples be used as dict keys or set members when their contents are hashable.",
+    "tip": "Use tuples for fixed, often heterogeneous records (like an (x, y) coordinate) and lists for homogeneous, growable collections."
+  },
+  {
+    "category_key": "python",
+    "category_label": "Python",
+    "difficulty": "advanced",
+    "question": "What problem does Python's Global Interpreter Lock (GIL) create for CPU-bound multithreaded code in CPython?",
+    "options": [
+      "It prevents Python programs from starting more than one thread at all",
+      "Only one thread can execute Python bytecode at a time, so CPU-bound threads don't get true parallel speedup",
+      "It only affects I/O-bound code, never CPU-bound code",
+      "It was fully removed starting in Python 3 and no longer applies"
+    ],
+    "correct_index": 1,
+    "explanation": "CPython's GIL ensures only one thread executes Python bytecode at a time. Threads still help with I/O-bound work since the GIL is released during I/O waits, but CPU-bound work sees little to no benefit from threading alone.",
+    "tip": "For CPU-bound parallelism in Python, use the `multiprocessing` module (separate processes, each with its own GIL) or offload the hot path to a native extension, rather than relying on `threading`."
+  },
+  {
+    "category_key": "nodejs",
+    "category_label": "Node.js",
+    "difficulty": "beginner",
+    "question": "What is Node.js primarily used for?",
+    "options": [
+      "Styling web pages with CSS",
+      "Running JavaScript outside the browser, commonly for servers and tooling",
+      "A declarative database query language",
+      "A CSS layout framework"
+    ],
+    "correct_index": 1,
+    "explanation": "Node.js is a JavaScript runtime built on Chrome's V8 engine that lets JavaScript execute outside a browser — most commonly used to build servers, CLIs, and build tooling.",
+    "tip": "Because it shares a language with the frontend, Node lets teams reuse validation and utility logic between client and server code."
+  },
+  {
+    "category_key": "nodejs",
+    "category_label": "Node.js",
+    "difficulty": "intermediate",
+    "question": "Why is Node.js's non-blocking, event-driven I/O model well suited to handling many concurrent connections?",
+    "options": [
+      "It spins up a brand-new OS thread for every incoming request",
+      "A single thread delegates I/O work like disk or network access to the system and keeps processing other events instead of blocking and waiting",
+      "It processes requests strictly one at a time, fully finishing each before starting the next",
+      "It disables the event loop entirely whenever I/O-bound work is happening"
+    ],
+    "correct_index": 1,
+    "explanation": "Node's event loop lets a single main thread issue an I/O operation (like a database query or file read), register a callback, and immediately move on to other work; when the I/O completes, the callback is queued back onto the event loop — avoiding the overhead of dedicating a blocked thread per connection.",
+    "tip": "Avoid long synchronous CPU-bound work on Node's main thread (e.g. heavy synchronous loops) — it blocks the event loop for every other connection; offload it to worker threads or a separate service instead."
+  },
+  {
+    "category_key": "nodejs",
+    "category_label": "Node.js",
+    "difficulty": "advanced",
+    "question": "What is 'callback hell' and how do Promises/async-await address it?",
+    "options": [
+      "It's a memory leak caused by too many callbacks; Promises fix it through garbage collection tuning",
+      "It's deeply nested, hard-to-read callback code from chained sequential async operations; Promises and async/await let you write and read that same logic in a flatter, more linear style",
+      "It only happens in synchronous code, and Promises fix it by making that code asynchronous instead",
+      "It's a Node-specific compiler error thrown when too many functions are nested"
+    ],
+    "correct_index": 1,
+    "explanation": "Chaining multiple async operations with plain callbacks nests each subsequent step inside the previous callback's body, producing deeply indented, error-prone code. Promises flatten this via `.then()` chaining, and async/await goes further, letting you write asynchronous code that reads like ordinary sequential code, with try/catch for error handling.",
+    "tip": "Wrap legacy callback-based APIs with `util.promisify` (or an equivalent Promise wrapper) so the rest of your codebase can consistently use async/await instead of mixing styles."
+  },
+  {
+    "category_key": "sql",
+    "category_label": "SQL & Databases",
+    "difficulty": "beginner",
+    "question": "Which SQL clause is used to filter individual rows before any grouping happens?",
+    "options": [
+      "GROUP BY",
+      "WHERE",
+      "HAVING",
+      "ORDER BY"
+    ],
+    "correct_index": 1,
+    "explanation": "`WHERE` filters individual rows before they're grouped; `HAVING` filters groups after aggregation (`GROUP BY`) has already occurred.",
+    "tip": "If you need to filter based on an aggregate result, like `COUNT(*) > 5`, use `HAVING`; for filtering raw rows before grouping, use `WHERE`."
+  },
+  {
+    "category_key": "sql",
+    "category_label": "SQL & Databases",
+    "difficulty": "intermediate",
+    "question": "What is the difference between an INNER JOIN and a LEFT JOIN?",
+    "options": [
+      "They always return identical result sets",
+      "INNER JOIN returns only rows with matches in both tables; LEFT JOIN returns all rows from the left table plus matches from the right, with NULLs where there's no match",
+      "LEFT JOIN can only be used when joining a single table to itself",
+      "INNER JOIN returns all rows from both tables regardless of whether they match"
+    ],
+    "correct_index": 1,
+    "explanation": "`INNER JOIN` keeps only rows that have a match in both tables. `LEFT JOIN` keeps every row from the left table, filling in NULLs for the right table's columns whenever there's no matching row.",
+    "tip": "Reach for `LEFT JOIN` when you need to preserve 'parent' rows even if they have no related 'child' rows — for example, listing all customers, including those with zero orders."
+  },
+  {
+    "category_key": "sql",
+    "category_label": "SQL & Databases",
+    "difficulty": "advanced",
+    "question": "Why can adding an index on a column speed up SELECT queries but slow down INSERT/UPDATE/DELETE operations?",
+    "options": [
+      "Indexes are only ever used by SELECT statements and have zero cost anywhere else",
+      "An index maintains an ordered lookup structure, commonly a B-tree, that must be updated whenever the underlying data changes, trading write overhead for faster reads",
+      "Indexes convert the entire table to read-only mode",
+      "Indexes only change where a table is physically stored on disk, not query performance"
+    ],
+    "correct_index": 1,
+    "explanation": "A database index (commonly a B-tree) keeps a separate, sorted structure that points back to table rows so lookups and range scans can avoid a full table scan. Every write that changes an indexed column must also update that index structure, which adds overhead to write operations.",
+    "tip": "Index columns that are frequently filtered, joined, or sorted on, but avoid over-indexing write-heavy tables — every extra index adds write cost on every insert/update/delete."
+  },
+  {
+    "category_key": "docker",
+    "category_label": "Docker & Containers",
+    "difficulty": "beginner",
+    "question": "What is the main difference between a Docker image and a Docker container?",
+    "options": [
+      "They are two names for exactly the same thing",
+      "An image is a read-only template/blueprint; a container is a running (or stopped) instance created from that image",
+      "A container is used to build images, and images can't be run directly",
+      "Images can only run on Linux, while containers can run on any operating system"
+    ],
+    "correct_index": 1,
+    "explanation": "A Docker image is an immutable, layered filesystem snapshot plus metadata, similar to a class definition. A container is a runtime instance of that image, similar to an object, with its own writable layer, running process, and state.",
+    "tip": "Because containers are cheap and disposable, treat them as stateless — persist any data you actually care about in a volume, not in the container's writable layer."
+  },
+  {
+    "category_key": "docker",
+    "category_label": "Docker & Containers",
+    "difficulty": "intermediate",
+    "question": "What is the purpose of a `.dockerignore` file?",
+    "options": [
+      "It lists files that should never be committed to git",
+      "It excludes specified files and directories from being sent to the Docker build context, speeding up builds and keeping unnecessary files out of images",
+      "It tells Docker which running containers to hide from `docker ps`",
+      "It disables specific instructions inside a Dockerfile"
+    ],
+    "correct_index": 1,
+    "explanation": "Similar to `.gitignore`, `.dockerignore` prevents matched files, such as `node_modules`, `.git`, or local env files, from being sent to the Docker daemon as part of the build context. This reduces build time and keeps secrets or bulk files out of the resulting image.",
+    "tip": "Always exclude `.git`, dependency directories, and local secret files via `.dockerignore` to keep images small and builds fast."
+  },
+  {
+    "category_key": "docker",
+    "category_label": "Docker & Containers",
+    "difficulty": "advanced",
+    "question": "Why does Docker layer caching make it beneficial to copy `package.json` and run `npm install` before copying the rest of the application source in a Dockerfile?",
+    "options": [
+      "Instruction order in a Dockerfile has no effect on build speed",
+      "Each instruction creates a cacheable layer; if earlier layers like the dependency install haven't changed, Docker reuses the cached layer and skips re-running it, so ordering less-frequently-changed steps first avoids unnecessary rebuilds",
+      "Docker always rebuilds every layer from scratch regardless of what changed",
+      "It's required syntax with no actual performance implication"
+    ],
+    "correct_index": 1,
+    "explanation": "Docker builds images layer by layer and caches each layer; a layer is invalidated, and everything after it rebuilt, only when its inputs change. Copying just the dependency manifest and installing dependencies before copying the rest of the source means that as long as dependencies haven't changed, that expensive install step is served from cache even when only application code changes.",
+    "tip": "Order Dockerfile instructions from least-frequently-changed to most-frequently-changed — dependencies before source code — to maximize cache hits and speed up rebuilds."
+  },
+  {
+    "category_key": "general_swe",
+    "category_label": "Software Engineering Fundamentals",
+    "difficulty": "beginner",
+    "question": "What is the primary purpose of version control systems like Git?",
+    "options": [
+      "To compile code faster than a standard compiler",
+      "To track changes to files over time and enable collaboration between multiple developers",
+      "To automatically find and fix bugs in code",
+      "To replace the need for automated testing"
+    ],
+    "correct_index": 1,
+    "explanation": "Git and other version control systems record a history of changes, let multiple people work on the same codebase concurrently through branches, and provide a way to review, merge, and roll back changes safely.",
+    "tip": "Commit small, logically-related changes with clear messages — it makes history, code review, and tools like `git bisect` far more useful when debugging later."
+  },
+  {
+    "category_key": "general_swe",
+    "category_label": "Software Engineering Fundamentals",
+    "difficulty": "intermediate",
+    "question": "In Big-O notation, what does O(n log n) typically describe, using comparison-based sorting as an example?",
+    "options": [
+      "An algorithm whose runtime is constant regardless of input size",
+      "An algorithm whose runtime grows proportionally to the input size multiplied by the log of the input size — the typical complexity of efficient comparison-based sorts like merge sort",
+      "An algorithm that always takes exponential time to complete",
+      "An algorithm that only works correctly on already-sorted input"
+    ],
+    "correct_index": 1,
+    "explanation": "O(n log n) describes algorithms, such as merge sort or heap sort, that scale much better than quadratic O(n²) algorithms for large inputs, because the log n factor grows far more slowly than n as the input size increases.",
+    "tip": "When comparing algorithm choices, focus on how runtime scales as input size grows (Big-O) rather than micro-optimizing constant-time operations — asymptotic behavior dominates for large n."
+  },
+  {
+    "category_key": "general_swe",
+    "category_label": "Software Engineering Fundamentals",
+    "difficulty": "advanced",
+    "question": "Why does test isolation — keeping a unit test independent of external systems like a database or network — matter for a good test suite?",
+    "options": [
+      "Tests should share global state so the whole suite runs faster",
+      "Each unit test verifies a small, isolated piece of behavior independently of external systems, so failures are fast, deterministic, and pinpoint the exact broken logic",
+      "Unit tests are meant to fully replace integration and end-to-end tests",
+      "Test isolation only affects performance, never correctness or reliability"
+    ],
+    "correct_index": 1,
+    "explanation": "Unit tests aim to verify a single unit of logic in isolation, typically by mocking or stubbing external dependencies, so a failure clearly points to a bug in that unit rather than an unrelated system, and so the suite runs fast enough to be run constantly during development.",
+    "tip": "If a 'unit' test needs a real database or network call to pass, it's actually an integration test — keep the two separate so your fast feedback loop of unit tests doesn't become slow and flaky."
+  }
+]

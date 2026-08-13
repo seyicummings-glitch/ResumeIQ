@@ -1,0 +1,333 @@
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.models import JobDescription, Resume, User
+from app.models.roadmap_models import LearningRoadmap, RoadmapTopicProgress
+from app.models.skill_assessment_models import SkillAssessmentAttempt
+from app.models.interview_models import InterviewSession
+from app.security import get_current_user, get_session_id_from_request
+from app.services.analysis_store import get_latest_analysis
+from app.services.resume_structurer import extract_skills_list
+from app.services.platform_settings import is_ai_enabled
+from app.services.learning_roadmap import build_roadmap, detect_profession_category
+from app.services.learning_roadmap_ai import generate_learning_roadmap
+from app.services.skill_resources import fetch_all_resources, get_resource_links
+from app.services.analytics import track_event, EVENT_TYPES, FEATURE_ROADMAP
+from app.services.feature_gate import check_and_consume, FeatureAccessDenied
+
+router = APIRouter(prefix="/roadmap", tags=["Learning Roadmap"])
+
+
+def _skill_assessment_summary(db: Session, user_id: int) -> str | None:
+    attempt = (
+        db.query(SkillAssessmentAttempt)
+        .filter(SkillAssessmentAttempt.user_id == user_id)
+        .order_by(SkillAssessmentAttempt.created_at.desc())
+        .first()
+    )
+    if not attempt:
+        return None
+
+    breakdown = attempt.category_breakdown or []
+    weak = sorted(breakdown, key=lambda item: item.get("pct", 0))[:3]
+    weak_text = ", ".join(f"{item.get('category_label', item.get('category_key'))} ({item.get('pct', 0)}%)" for item in weak)
+    return (
+        f"Technical score: {attempt.technical_score}/100, soft-skill score: {attempt.soft_score}/100. "
+        f"Weakest areas: {weak_text or 'none recorded'}."
+    )
+
+
+def _interview_summary(db: Session, user_id: int) -> str | None:
+    session = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.user_id == user_id)
+        .order_by(InterviewSession.created_at.desc())
+        .first()
+    )
+    if not session or not session.feedback_json:
+        return None
+
+    areas = session.feedback_json.get("areas_to_improve") or []
+    if not areas:
+        return None
+    return "Areas to improve from the most recent mock interview: " + "; ".join(areas[:4])
+
+
+def _assign_topic_keys(stages: list[dict]) -> list[dict]:
+    for stage_index, stage in enumerate(stages):
+        for topic_index, topic in enumerate(stage["topics"]):
+            topic["topic_key"] = f"{stage_index}-{topic_index}"
+    return stages
+
+
+def _generate_and_save_roadmap(db: Session, current_user: User, request: Request = None) -> LearningRoadmap:
+    analysis = get_latest_analysis(db, current_user.id)
+
+    resume_text = ""
+    resume_skills: list[str] = []
+    missing_skills: list[str] = []
+    jd_content = ""
+
+    if analysis:
+        resume = db.query(Resume).filter(Resume.id == analysis.resume_id).first()
+        resume_text = resume.raw_text or "" if resume else ""
+        resume_skills = extract_skills_list(resume.skills or "") if resume else []
+        missing_skills = (analysis.result_json or {}).get("skill_match", {}).get("missing_skills", []) or []
+        jd = db.query(JobDescription).filter(JobDescription.id == analysis.job_description_id).first()
+        jd_content = jd.content if jd else ""
+
+    skill_assessment_summary = _skill_assessment_summary(db, current_user.id)
+    interview_summary = _interview_summary(db, current_user.id)
+
+    stages_result = None
+    if is_ai_enabled(db):
+        stages_result = generate_learning_roadmap(
+            target_role=current_user.target_role or "",
+            industry=current_user.industry or "",
+            experience_level=current_user.experience_level or "",
+            resume_text=resume_text,
+            resume_skills=resume_skills,
+            missing_skills=missing_skills,
+            jd_content=jd_content,
+            skill_assessment_summary=skill_assessment_summary,
+            interview_summary=interview_summary,
+        )
+
+    source = "ai"
+    if stages_result is None:
+        stages_result = build_roadmap(
+            missing_skills, resume_skills,
+            target_role=current_user.target_role, industry=current_user.industry, resume_text=resume_text,
+        )
+        source = "fallback"
+
+    stages = _assign_topic_keys(stages_result["stages"])
+
+    roadmap = LearningRoadmap(
+        user_id=current_user.id,
+        source=source,
+        target_role=current_user.target_role,
+        industry=current_user.industry,
+        detected_profession=stages_result.get("detected_profession"),
+        detected_industry=stages_result.get("detected_industry"),
+        stages_json=stages,
+    )
+    db.add(roadmap)
+    db.commit()
+    db.refresh(roadmap)
+
+    track_event(
+        db, EVENT_TYPES["ROADMAP_GENERATED"], FEATURE_ROADMAP, user_id=current_user.id,
+        metadata={"roadmap_id": roadmap.id, "source": source, "detected_profession": roadmap.detected_profession},
+        request=request, session_id=get_session_id_from_request(request),
+    )
+    return roadmap
+
+
+def _serialize_roadmap(db: Session, roadmap: LearningRoadmap, user_id: int) -> dict:
+    progress_rows = db.query(RoadmapTopicProgress).filter(
+        RoadmapTopicProgress.roadmap_id == roadmap.id
+    ).all()
+    completed_keys = {row.topic_key for row in progress_rows if row.completed}
+    all_skill_resources = fetch_all_resources(db)
+
+    # Re-derived from the roadmap's already-detected profession/industry rather than
+    # persisted separately — this is the same detect_profession_category() heuristic
+    # build_roadmap() uses internally, applied to fields that exist for both the AI
+    # and rule-based paths, so it works uniformly without a schema change. Used only
+    # as the last-resort "closest match for your field" resource tier below, never to
+    # pick which topics appear.
+    profession_category = detect_profession_category(
+        target_role=roadmap.detected_profession, industry=roadmap.detected_industry,
+        resume_skills=[], missing_skills=[],
+    )
+
+    total_hours = 0
+    done_count = 0
+    total_count = 0
+
+    stages = []
+    for stage in roadmap.stages_json:
+        topics = []
+        for topic in stage["topics"]:
+            done = topic["topic_key"] in completed_keys
+            total_hours += topic.get("estimated_hours", 0)
+            total_count += 1
+            if done:
+                done_count += 1
+            resource_links = get_resource_links(topic["title"], all_skill_resources, profession_category)
+            topics.append({**topic, "done": done, "resource_links": resource_links})
+        stages.append({**stage, "topics": topics})
+
+    return {
+        "roadmap_id": roadmap.id,
+        "source": roadmap.source,
+        "target_role": roadmap.target_role,
+        "industry": roadmap.industry,
+        "detected_profession": roadmap.detected_profession,
+        "detected_industry": roadmap.detected_industry,
+        "stages": stages,
+        "created_at": roadmap.created_at,
+        "stats": {
+            "total_hours": total_hours,
+            "done_count": done_count,
+            "total_count": total_count,
+        },
+    }
+
+
+@router.get("")
+def get_roadmap(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    try:
+        analysis = get_latest_analysis(db, current_user.id)
+        if not current_user.target_role and not analysis:
+            return {"has_context": False, "roadmap": None}
+
+        roadmap = (
+            db.query(LearningRoadmap)
+            .filter(LearningRoadmap.user_id == current_user.id)
+            .order_by(LearningRoadmap.created_at.desc())
+            .first()
+        )
+        if not roadmap:
+            roadmap = _generate_and_save_roadmap(db, current_user, request)
+
+        return {"has_context": True, "roadmap": _serialize_roadmap(db, roadmap, current_user.id)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error building roadmap: {str(e)}")
+
+
+@router.post("/regenerate")
+def regenerate_roadmap(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    try:
+        analysis = get_latest_analysis(db, current_user.id)
+        if not current_user.target_role and not analysis:
+            raise HTTPException(
+                status_code=400,
+                detail="Set a target role in your profile or save an analysis first so the roadmap has context to build from.",
+            )
+
+        try:
+            check_and_consume(db, current_user, "learning_roadmap")
+        except FeatureAccessDenied as exc:
+            raise HTTPException(status_code=402, detail=exc.payload)
+
+        roadmap = _generate_and_save_roadmap(db, current_user, request)
+        return {"has_context": True, "roadmap": _serialize_roadmap(db, roadmap, current_user.id)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error regenerating roadmap: {str(e)}")
+
+
+class RoadmapToggleInput(BaseModel):
+    topic_key: str
+
+
+@router.post("/topics/toggle")
+def toggle_roadmap_topic(
+    data: RoadmapToggleInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    try:
+        roadmap = (
+            db.query(LearningRoadmap)
+            .filter(LearningRoadmap.user_id == current_user.id)
+            .order_by(LearningRoadmap.created_at.desc())
+            .first()
+        )
+        if not roadmap:
+            raise HTTPException(status_code=404, detail="No roadmap found. Load your roadmap first.")
+
+        row = db.query(RoadmapTopicProgress).filter(
+            RoadmapTopicProgress.roadmap_id == roadmap.id,
+            RoadmapTopicProgress.topic_key == data.topic_key,
+        ).first()
+
+        if row:
+            row.completed = not row.completed
+        else:
+            row = RoadmapTopicProgress(
+                user_id=current_user.id, roadmap_id=roadmap.id, topic_key=data.topic_key, completed=True
+            )
+            db.add(row)
+
+        db.commit()
+        db.refresh(row)
+
+        if row.completed:
+            total_topics = sum(len(stage["topics"]) for stage in roadmap.stages_json)
+            completed_topics = (
+                db.query(RoadmapTopicProgress)
+                .filter(RoadmapTopicProgress.roadmap_id == roadmap.id, RoadmapTopicProgress.completed == True)  # noqa: E712
+                .count()
+            )
+            if total_topics > 0 and completed_topics >= total_topics:
+                track_event(
+                    db, EVENT_TYPES["ROADMAP_COMPLETED"], FEATURE_ROADMAP, user_id=current_user.id,
+                    metadata={"roadmap_id": roadmap.id}, request=request, session_id=get_session_id_from_request(request),
+                )
+
+        return {"topic_key": data.topic_key, "completed": row.completed}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating roadmap progress: {str(e)}")
+
+
+_RESOURCE_CLICK_EVENTS = {
+    "video": EVENT_TYPES["YOUTUBE_RESOURCE_OPENED"],
+    "course": EVENT_TYPES["COURSE_OPENED"],
+    "docs": EVENT_TYPES["DOCUMENTATION_OPENED"],
+    "skill": EVENT_TYPES["SKILL_VIEWED"],
+}
+
+
+class ResourceClickInput(BaseModel):
+    resource_type: str  # "video" | "course" | "docs" | "skill"
+    skill_title: str
+    url: str | None = None
+
+
+@router.post("/track-resource-click")
+def track_resource_click(
+    data: ResourceClickInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    request: Request = None,
+):
+    """Fire-and-forget beacon the frontend calls when a user opens a roadmap
+    resource (a video, course, docs link) or expands a topic to view it —
+    these have no other backend round-trip (the frontend renders plain <a>
+    links directly to the resource URL), so without this call there would be
+    no way to know which resources users actually engage with."""
+    event_type = _RESOURCE_CLICK_EVENTS.get(data.resource_type)
+    if not event_type:
+        raise HTTPException(status_code=400, detail=f"Unknown resource_type '{data.resource_type}'.")
+
+    track_event(
+        db, event_type, FEATURE_ROADMAP, user_id=current_user.id,
+        metadata={"skill": data.skill_title, "url": data.url},
+        request=request, session_id=get_session_id_from_request(request),
+    )
+    return {"tracked": True}
