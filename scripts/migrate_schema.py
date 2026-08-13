@@ -61,6 +61,12 @@ STATEMENTS = [
     "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR",
     "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS credits_purchased INTEGER",
     "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS external_reference VARCHAR",
+    # AI Resume Builder conversation history — a user can now have multiple conversations per
+    # kind (New Chat + switch back to any past one), so the old one-row-per-(user,kind)
+    # uniqueness no longer holds.
+    "ALTER TABLE ai_conversations DROP CONSTRAINT IF EXISTS uq_ai_conversation_user_kind",
+    "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS title VARCHAR",
+    "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
 ]
 
 
