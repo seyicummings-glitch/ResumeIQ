@@ -1,23 +1,23 @@
 import { createContext, useContext } from 'react'
-import { useServerSyncedConversation } from '../hooks/useServerSyncedConversation'
+import { useConversationHistory } from '../hooks/useConversationHistory'
 
 const ResumeBuilderDraftContext = createContext(null)
 
 const EMPTY_EXTRA = { draft: null, jdContent: '', jdSourceUrl: '' }
 
 /**
- * Holds the AI Resume Builder conversation (chat transcript, the draft resume built so far, and
- * any job description extracted from a link) above the router so it survives navigating to
- * other pages — and, via useServerSyncedConversation, survives closing the browser or logging
- * in from a different device too. Only changes when the user actively chats or explicitly
- * clears it.
+ * Holds the AI Resume Builder's conversation history (multiple conversations per account, a
+ * "New Chat" action, and switching back to any past one) above the router so it survives
+ * navigating to other pages — and, via useConversationHistory, survives closing the browser or
+ * logging in from a different device too. Each conversation has its own chat transcript, draft
+ * resume built so far, and any job description extracted from a link.
  */
 export function ResumeBuilderDraftProvider({ children }) {
-  const synced = useServerSyncedConversation('resume_builder')
-  const extra = synced.state.extra || EMPTY_EXTRA
+  const history = useConversationHistory('resume_builder')
+  const extra = history.state.extra || EMPTY_EXTRA
 
   const state = {
-    messages: synced.state.messages,
+    messages: history.state.messages,
     draft: extra.draft ?? null,
     jdContent: extra.jdContent ?? '',
     jdSourceUrl: extra.jdSourceUrl ?? '',
@@ -39,7 +39,7 @@ export function ResumeBuilderDraftProvider({ children }) {
       extraChanged = true
     }
 
-    synced.updateState({
+    history.updateState({
       ...('messages' in patch ? { messages: patch.messages } : {}),
       ...(extraChanged ? { extra: nextExtra } : {}),
     })
@@ -47,7 +47,16 @@ export function ResumeBuilderDraftProvider({ children }) {
 
   return (
     <ResumeBuilderDraftContext.Provider
-      value={{ state, updateState, clearState: synced.clearState, hydrated: synced.hydrated }}
+      value={{
+        state,
+        updateState,
+        hydrated: history.hydrated,
+        conversations: history.conversations,
+        activeConversationId: history.activeId,
+        startNewConversation: history.startNewConversation,
+        switchConversation: history.switchConversation,
+        deleteConversation: history.deleteConversation,
+      }}
     >
       {children}
     </ResumeBuilderDraftContext.Provider>

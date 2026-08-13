@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Send, Paperclip, ImagePlus, FileUp, X, Sparkles, FileText, Link2 } from 'lucide-react'
+import { Send, Paperclip, ImagePlus, FileUp, X, Sparkles, FileText, Link2, Plus, Trash2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useResumes } from '../hooks/useResumes'
 import * as resumeApi from '../api/resume'
@@ -102,6 +102,70 @@ function TypingBubble() {
   )
 }
 
+/** Short "2h ago" / "3d ago" style label for a history entry — falls back to a date once it's
+ * old enough that a relative label stops being useful at a glance. */
+function formatRelativeTime(dateString) {
+  if (!dateString) return ''
+  const diffMs = Date.now() - new Date(dateString).getTime()
+  const minutes = Math.floor(diffMs / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(dateString))
+}
+
+function ConversationHistoryPanel({ conversations, activeId, onSelect, onNew, onDelete }) {
+  return (
+    <Card className="flex h-full flex-col gap-0 p-0">
+      <div className="border-b border-border p-3">
+        <Button onClick={onNew} size="sm" className="w-full">
+          <Plus size={14} aria-hidden="true" /> New chat
+        </Button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2">
+        {conversations.length === 0 ? (
+          <p className="p-2 text-xs text-text/60">No past conversations yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {conversations.map((conversation) => {
+              const label = conversation.title || 'New conversation'
+              const isActive = conversation.id === activeId
+              return (
+                <li key={conversation.id} className="group flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onSelect(conversation.id)}
+                    title={label}
+                    className={clsx(
+                      'min-w-0 flex-1 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+                      isActive ? 'bg-accent/15 text-text-h' : 'text-text hover:bg-border/40 hover:text-text-h'
+                    )}
+                  >
+                    <span className="block truncate">{label}</span>
+                    <span className="block truncate text-[11px] text-text/50">{formatRelativeTime(conversation.updatedAt)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(conversation.id)}
+                    aria-label="Delete conversation"
+                    title="Delete conversation"
+                    className="shrink-0 rounded-md p-1.5 text-text/40 opacity-0 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <Trash2 size={13} aria-hidden="true" />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function DraftPreview({ draft, sourceLabel, onSave, isSaving, isSaved }) {
   const hasContent = hasResumeContent(draft)
 
@@ -143,7 +207,10 @@ export default function ResumeBuilderPage() {
   const chatMutation = useChatAboutResume()
   const uploadMutation = useUploadResumeForChat()
   const saveMutation = useSaveEnhancedResume()
-  const { state, updateState, hydrated } = useResumeBuilderDraft()
+  const {
+    state, updateState, hydrated,
+    conversations, activeConversationId, startNewConversation, switchConversation, deleteConversation,
+  } = useResumeBuilderDraft()
   const { messages, draft, jdContent, jdSourceUrl } = state
 
   const activeResume = resumes?.find((resume) => resume.is_active)
@@ -337,6 +404,41 @@ export default function ResumeBuilderPage() {
     )
   }
 
+  function resetTransientUiState() {
+    setChatError(null)
+    setInput('')
+    setPendingAttachment(null)
+  }
+
+  async function handleNewChat() {
+    resetTransientUiState()
+    saveMutation.reset()
+    await startNewConversation()
+  }
+
+  async function handleSelectConversation(id) {
+    if (id === activeConversationId) return
+    resetTransientUiState()
+    saveMutation.reset()
+    try {
+      await switchConversation(id)
+    } catch (err) {
+      setChatError(err.message)
+    }
+  }
+
+  async function handleDeleteConversation(id) {
+    try {
+      await deleteConversation(id)
+      if (id === activeConversationId) {
+        resetTransientUiState()
+        saveMutation.reset()
+      }
+    } catch (err) {
+      setChatError(err.message)
+    }
+  }
+
   const isBusy = chatMutation.isPending || uploadMutation.isPending || jdExtracting || attachmentLoading
   const lastAssistantMessage = [...messages].reverse().find((m) => m.role === 'assistant')
   const sourceLabel =
@@ -359,7 +461,17 @@ export default function ResumeBuilderPage() {
         </p>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[13rem_1.5fr_1fr]">
+        <div className="max-h-64 min-h-0 lg:h-full lg:max-h-none">
+          <ConversationHistoryPanel
+            conversations={conversations}
+            activeId={activeConversationId}
+            onSelect={handleSelectConversation}
+            onNew={handleNewChat}
+            onDelete={handleDeleteConversation}
+          />
+        </div>
+
         <div className="flex min-h-0 flex-col gap-3">
           {jdSourceUrl && (
             <div className="flex items-center gap-1.5 rounded-md bg-surface px-3 py-1.5 text-xs text-text/70">
