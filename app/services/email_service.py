@@ -49,3 +49,14 @@ def send_password_reset_email(to_email: str, reset_token: str) -> None:
         "This link expires in 5 minutes. If you didn't request this, you can safely ignore this email."
     )
     _send(to_email, "Reset your ResumeIQ password", body)
+
+
+def send_verification_email(to_email: str, verification_token: str) -> None:
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    verify_link = f"{frontend_url}/verify-email?token={verification_token}"
+    body = (
+        "Welcome to ResumeIQ! Please confirm this is your email address to activate your account.\n\n"
+        f"Verify your email: {verify_link}\n\n"
+        "This link expires in 24 hours. If you didn't create a ResumeIQ account, you can safely ignore this email."
+    )
+    _send(to_email, "Verify your ResumeIQ email address", body)

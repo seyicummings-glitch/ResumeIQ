@@ -15,6 +15,9 @@ from app.schemas import (
     Token,
     PasswordResetRequest,
     PasswordResetConfirm,
+    RegisterResponse,
+    EmailVerificationConfirm,
+    ResendVerificationRequest,
 )
 from app.security import (
     hash_password,
@@ -23,17 +26,19 @@ from app.security import (
     get_current_user,
     create_password_reset_token,
     verify_password_reset_token,
+    create_email_verification_token,
+    verify_email_verification_token,
     require_admin,
     normalize_email,
 )
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_AUTH
-from app.services.email_service import is_email_configured, send_password_reset_email
+from app.services.email_service import is_email_configured, send_password_reset_email, send_verification_email
 from app.services.feature_gate import grant_signup_credits
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register", response_model=RegisterResponse)
 def register(user: UserCreate, db: Session = Depends(get_db), request: Request = None):
     email = normalize_email(user.email)
     existing_user = db.query(User).filter(User.email == email).first()
@@ -43,7 +48,8 @@ def register(user: UserCreate, db: Session = Depends(get_db), request: Request =
     new_user = User(
         email=email,
         hashed_password=hash_password(user.password),
-        full_name=user.full_name
+        full_name=user.full_name,
+        is_verified=False,
     )
     db.add(new_user)
     try:
@@ -61,7 +67,33 @@ def register(user: UserCreate, db: Session = Depends(get_db), request: Request =
     grant_signup_credits(db, new_user)
 
     track_event(db, EVENT_TYPES["USER_REGISTERED"], FEATURE_AUTH, user_id=new_user.id, request=request)
-    return new_user
+
+    # New accounts can't log in until this link is confirmed (see login()'s
+    # is_verified check and verify_email() below) — this is what stops someone
+    # from signing up with an address they don't actually control.
+    verification_token = create_email_verification_token(new_user.email)
+
+    if not is_email_configured():
+        # Dev fallback: no SMTP configured, so hand the token back directly
+        # instead of silently failing to deliver a verification link.
+        return {
+            "message": "Account created. This app isn't sending real emails yet — use the token below to verify.",
+            "email": new_user.email,
+            "verification_token": verification_token,
+        }
+
+    try:
+        send_verification_email(new_user.email, verification_token)
+    except Exception:
+        # The account already exists at this point — don't fail registration over
+        # a flaky send. The user can request a fresh link from the login page.
+        pass
+
+    return {
+        "message": "Account created. Check your email to verify your address before logging in.",
+        "email": new_user.email,
+        "verification_token": None,
+    }
 
 
 @router.post("/login", response_model=Token)
@@ -77,6 +109,18 @@ def login(credentials: UserLogin, db: Session = Depends(get_db), request: Reques
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account has been deactivated. Contact support if you believe this is a mistake."
+        )
+
+    if not user.is_verified:
+        # Structured detail (not a plain string) so the frontend can tell this apart
+        # from other 403s and offer a "resend verification email" action instead of
+        # just displaying the message — see client.js's extractErrorMessage().
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "email_not_verified",
+                "message": "Please verify your email before logging in. Check your inbox for the link, or request a new one.",
+            },
         )
 
     user.last_login_at = datetime.now(timezone.utc)
@@ -185,6 +229,47 @@ def confirm_password_reset(data: PasswordResetConfirm, db: Session = Depends(get
 
     track_event(db, EVENT_TYPES["PASSWORD_RESET"], FEATURE_AUTH, user_id=user.id, request=request)
     return {"message": "Password has been reset successfully."}
+
+
+@router.post("/verify-email")
+def verify_email(data: EmailVerificationConfirm, db: Session = Depends(get_db)):
+    email = verify_email_verification_token(data.token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link.")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.is_verified:
+        user.is_verified = True
+        db.commit()
+
+    return {"message": "Email verified — you can now log in."}
+
+
+@router.post("/resend-verification")
+def resend_verification(data: ResendVerificationRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == normalize_email(data.email)).first()
+    if not user or user.is_verified:
+        # Same non-enumerating shape whether the address doesn't exist or is
+        # already verified — don't let this endpoint confirm which.
+        return {"message": "If that email exists and needs verification, a new link has been sent."}
+
+    verification_token = create_email_verification_token(user.email)
+
+    if not is_email_configured():
+        return {
+            "message": "Verification token generated.",
+            "verification_token": verification_token,
+        }
+
+    try:
+        send_verification_email(user.email, verification_token)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not send the verification email. Please try again later.")
+
+    return {"message": "If that email exists and needs verification, a new link has been sent."}
 
 
 @router.get("/admin-only")

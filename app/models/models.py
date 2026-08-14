@@ -13,6 +13,11 @@ class User(Base):
     full_name = Column(String, nullable=True)
     role = Column(String, default="user", nullable=False)
     status = Column(String, default="active", nullable=False)
+    # New signups start unverified and can't log in until they click the emailed
+    # verification link (see app/routes/auth.py's register()/login()/verify-email).
+    # The migration backfills existing rows to TRUE so nobody already using the
+    # app gets locked out — only accounts created after this shipped are False.
+    is_verified = Column(Boolean, default=False, nullable=False)
     phone = Column(String, nullable=True)
     location = Column(String, nullable=True)
     linkedin_url = Column(String, nullable=True)

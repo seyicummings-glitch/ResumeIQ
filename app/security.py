@@ -13,6 +13,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key-later")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 PASSWORD_RESET_EXPIRE_MINUTES = 5
+EMAIL_VERIFICATION_EXPIRE_MINUTES = 60 * 24  # 24 hours — longer than a reset link since people don't always check email right away
 
 oauth2_scheme = HTTPBearer()
 
@@ -60,6 +61,22 @@ def verify_password_reset_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "password_reset":
+            return None
+        return payload.get("sub")
+    except JWTError:
+        return None
+
+
+def create_email_verification_token(email: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=EMAIL_VERIFICATION_EXPIRE_MINUTES)
+    to_encode = {"sub": email, "exp": expire, "type": "email_verification"}
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_email_verification_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "email_verification":
             return None
         return payload.get("sub")
     except JWTError:

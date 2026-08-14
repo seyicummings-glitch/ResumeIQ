@@ -72,6 +72,10 @@ STATEMENTS = [
     "ALTER TABLE credit_balances ADD COLUMN IF NOT EXISTS last_free_refresh_at TIMESTAMPTZ",
     "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_signup_credits INTEGER NOT NULL DEFAULT 100",
     "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS free_credit_refresh_hours INTEGER NOT NULL DEFAULT 720",
+    # Email verification — existing users are grandfathered in as verified
+    # (DEFAULT TRUE here); new registrations explicitly set is_verified=False
+    # (see the User model's Python-side default and app/routes/auth.py's register()).
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT TRUE",
 ]
 
 

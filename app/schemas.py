@@ -46,6 +46,7 @@ class UserResponse(BaseModel):
     email: str
     full_name: str | None = None
     role: str
+    is_verified: bool
     created_at: datetime
     phone: str | None = None
     location: str | None = None
@@ -102,6 +103,26 @@ class PasswordResetConfirm(BaseModel):
     @classmethod
     def _validate_new_password(cls, value: str) -> str:
         return validate_password_strength(value)
+
+
+class RegisterResponse(BaseModel):
+    """Registration no longer logs the user in directly — they must verify their
+    email first (see app/routes/auth.py's register()/login()) — so this returns
+    a status message instead of the created user. `verification_token` is only
+    populated in the dev fallback where no SMTP is configured (mirrors
+    PasswordResetRequest's `reset_token` dev fallback)."""
+
+    message: str
+    email: str
+    verification_token: str | None = None
+
+
+class EmailVerificationConfirm(BaseModel):
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
 
 
 class JobDescriptionCreate(BaseModel):
