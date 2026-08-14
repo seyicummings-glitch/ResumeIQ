@@ -47,6 +47,9 @@ function extractErrorMessage(detail) {
   if (typeof detail === 'string') return detail
   // FastAPI validation errors: [{ loc, msg, type }, ...]
   if (Array.isArray(detail)) return detail.map((d) => d.msg).filter(Boolean).join(' ')
+  // Structured details like { code, message } — e.g. login's "email not verified" 403
+  // (see app/routes/auth.py) — carry a code the caller can branch on via error.detail.code.
+  if (typeof detail === 'object' && typeof detail.message === 'string') return detail.message
   return 'Something went wrong. Please try again.'
 }
 

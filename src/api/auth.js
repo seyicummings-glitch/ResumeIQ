@@ -9,12 +9,25 @@ import { apiRequest } from './client'
  * @property {string} created_at
  */
 
-/** @returns {Promise<User>} */
+/** Doesn't log the user in — new accounts must verify their email first (see login()'s
+ * 403 email_not_verified). `verification_token` is only present in the dev fallback
+ * when the backend has no SMTP configured (no real email was sent).
+ * @returns {Promise<{message: string, email: string, verification_token: string|null}>} */
 export function register({ email, password, fullName }) {
   return apiRequest('/auth/register', {
     method: 'POST',
     body: { email, password, full_name: fullName || null },
   })
+}
+
+/** @returns {Promise<{message: string}>} */
+export function verifyEmail(token) {
+  return apiRequest('/auth/verify-email', { method: 'POST', body: { token } })
+}
+
+/** Same non-enumerating response whether the address doesn't exist or is already verified. */
+export function resendVerification(email) {
+  return apiRequest('/auth/resend-verification', { method: 'POST', body: { email } })
 }
 
 /** @returns {Promise<{access_token: string, token_type: string}>} */

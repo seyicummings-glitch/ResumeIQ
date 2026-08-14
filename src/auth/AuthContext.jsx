@@ -57,15 +57,12 @@ export function AuthProvider({ children }) {
     return me
   }, [])
 
-  const register = useCallback(
-    async ({ email, password, fullName }) => {
-      await authApi.register({ email, password, fullName })
-      // Backend's /register doesn't return a token, so log in right after
-      // with the same credentials to land the user already authenticated.
-      return login({ email, password })
-    },
-    [login]
-  )
+  const register = useCallback(async ({ email, password, fullName }) => {
+    // New accounts start unverified and can't log in yet (see login()'s 403
+    // email_not_verified) — so unlike before, this does NOT log the user in.
+    // RegisterPage shows a "check your email" state with this response instead.
+    return authApi.register({ email, password, fullName })
+  }, [])
 
   const logout = useCallback(() => {
     authApi.logout().catch(() => {})
