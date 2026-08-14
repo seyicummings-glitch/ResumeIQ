@@ -22,3 +22,15 @@ def db_session():
     finally:
         session.close()
         engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_dns_lookups(monkeypatch):
+    """Registration's email deliverability check (app.schemas.validate_reachable_email)
+    does a real DNS lookup — unit tests never do real network I/O, so this is patched
+    to a no-op everywhere by default, keeping fictional test domains like example.com
+    working exactly like before. A test that wants to exercise the rejection path can
+    still override this with its own monkeypatch.setattr on check_email_deliverable."""
+    import app.schemas as schemas_module
+
+    monkeypatch.setattr(schemas_module, "check_email_deliverable", lambda *args, **kwargs: None)

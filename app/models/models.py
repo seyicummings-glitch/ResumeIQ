@@ -35,6 +35,23 @@ class User(Base):
     resumes = relationship("Resume", back_populates="owner")
 
 
+class PendingRegistration(Base):
+    """A signup that hasn't verified its email yet. Deliberately NOT a User row —
+    nothing in the `users` table exists until verify-email succeeds (see
+    app/routes/auth.py's register()/verify_email()), so a fake or unreachable
+    address never results in a real account, not even a locked one. One row per
+    email (re-registering the same still-unverified address overwrites it, e.g.
+    if the person mistyped their password and is retrying)."""
+
+    __tablename__ = "pending_registrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Resume(Base):
     __tablename__ = "resumes"
 

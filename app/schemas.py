@@ -2,6 +2,7 @@ import re
 
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
+from email_validator import validate_email as check_email_deliverable, EmailNotValidError
 
 
 def validate_password_strength(password: str) -> str:
@@ -25,10 +26,73 @@ def validate_password_strength(password: str) -> str:
     return password
 
 
+# Known disposable/temporary-inbox providers — rejected at registration so an
+# account can't be created against a mailbox that's designed to self-destruct.
+# This is on top of, not instead of, the email verification link: a disposable
+# inbox could otherwise still receive and click that link before expiring.
+# Mirrors the frontend's DISPOSABLE_EMAIL_DOMAINS
+# (src/lib/disposableEmailDomains.js) — keep both in sync.
+DISPOSABLE_EMAIL_DOMAINS = frozenset({
+    "mailinator.com", "mailinator.net", "mailinator.org",
+    "guerrillamail.com", "guerrillamail.info", "guerrillamail.biz",
+    "guerrillamail.de", "guerrillamail.net", "guerrillamail.org",
+    "sharklasers.com", "grr.la", "guerrillamailblock.com",
+    "10minutemail.com", "10minutemail.net", "10minutemail.co.uk",
+    "temp-mail.org", "tempmail.com", "tempmail.net", "tempmailo.com",
+    "throwawaymail.com", "yopmail.com", "yopmail.fr", "yopmail.net",
+    "trashmail.com", "trashmail.net", "trashmail.me",
+    "getnada.com", "dispostable.com", "fakeinbox.com",
+    "maildrop.cc", "mintemail.com", "mailnesia.com", "mailcatch.com",
+    "moakt.com", "spamgourmet.com", "spam4.me", "mytemp.email",
+    "emailondeck.com", "tempinbox.com", "discard.email", "discardmail.com",
+    "mohmal.com", "tempr.email", "temporarymail.com",
+    "burnermail.io", "luxusmail.org", "mytrashmail.com", "jetable.org",
+    "mailexpire.com", "incognitomail.org",
+})
+
+DISPOSABLE_EMAIL_MESSAGE = "Please use a permanent email address — disposable/temporary email providers aren't accepted."
+
+
+def validate_not_disposable_email(email: str) -> str:
+    domain = email.rsplit("@", 1)[-1].lower()
+    if domain in DISPOSABLE_EMAIL_DOMAINS:
+        raise ValueError(DISPOSABLE_EMAIL_MESSAGE)
+    return email
+
+
+DELIVERABILITY_ERROR_MESSAGE = "Please enter a valid email address that you can access."
+
+
+def validate_reachable_email(email: str) -> str:
+    """A live DNS lookup confirming the domain actually has mail servers (MX, or an
+    A/AAAA fallback) — catches typo'd or made-up domains synchronously, before any
+    account or verification email is created. This is on top of, not instead of,
+    the verification link: DNS can only confirm the *domain* can receive mail, not
+    that this specific mailbox exists or belongs to the person registering —
+    that's what clicking the link proves."""
+    try:
+        check_email_deliverable(email, check_deliverability=True, timeout=5)
+    except EmailNotValidError:
+        raise ValueError(DELIVERABILITY_ERROR_MESSAGE)
+    except Exception:
+        # A DNS/network hiccup on our end isn't a verdict about the address —
+        # don't block every signup in the app over an infrastructure blip.
+        pass
+    return email
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     full_name: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, value: EmailStr) -> EmailStr:
+        email = str(value)
+        validate_not_disposable_email(email)
+        validate_reachable_email(email)
+        return value
 
     @field_validator("password")
     @classmethod

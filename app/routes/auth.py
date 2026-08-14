@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.models import User
+from app.models.models import User, PendingRegistration
 from app.schemas import (
     UserCreate,
     UserLogin,
@@ -40,58 +40,54 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=RegisterResponse)
 def register(user: UserCreate, db: Session = Depends(get_db), request: Request = None):
+    # UserCreate.email already rejected bad formats, disposable providers, and
+    # domains with no mail servers at all (see app/schemas.py) before this runs.
     email = normalize_email(user.email)
     existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    new_user = User(
-        email=email,
-        hashed_password=hash_password(user.password),
-        full_name=user.full_name,
-        is_verified=False,
-    )
-    db.add(new_user)
-    try:
-        db.commit()
-    except IntegrityError:
-        # Guards the race between the existing_user check above and this commit
-        # (two concurrent registrations for the same email) — the DB's unique
-        # constraint is the real guarantee, this just keeps the error friendly.
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Email already registered")
-    db.refresh(new_user)
+    # No User row is created here — only a pending registration. The real
+    # account (see verify_email() below) doesn't exist until the emailed link
+    # is clicked, so a fake or unreachable address never results in an account
+    # at all, not even a locked one. Re-registering the same still-unverified
+    # address (e.g. retrying after a typo'd password) just overwrites the
+    # pending row and issues a fresh token.
+    pending = db.query(PendingRegistration).filter(PendingRegistration.email == email).first()
+    if pending:
+        pending.hashed_password = hash_password(user.password)
+        pending.full_name = user.full_name
+    else:
+        pending = PendingRegistration(
+            email=email,
+            hashed_password=hash_password(user.password),
+            full_name=user.full_name,
+        )
+        db.add(pending)
+    db.commit()
 
-    # Every new account starts with the admin-configured free token balance — see
-    # app/services/feature_gate.py's docstring for the full token-economy model.
-    grant_signup_credits(db, new_user)
-
-    track_event(db, EVENT_TYPES["USER_REGISTERED"], FEATURE_AUTH, user_id=new_user.id, request=request)
-
-    # New accounts can't log in until this link is confirmed (see login()'s
-    # is_verified check and verify_email() below) — this is what stops someone
-    # from signing up with an address they don't actually control.
-    verification_token = create_email_verification_token(new_user.email)
+    verification_token = create_email_verification_token(email)
 
     if not is_email_configured():
         # Dev fallback: no SMTP configured, so hand the token back directly
         # instead of silently failing to deliver a verification link.
         return {
-            "message": "Account created. This app isn't sending real emails yet — use the token below to verify.",
-            "email": new_user.email,
+            "message": "This app isn't sending real emails yet — use the token below to verify and finish creating your account.",
+            "email": email,
             "verification_token": verification_token,
         }
 
     try:
-        send_verification_email(new_user.email, verification_token)
+        send_verification_email(email, verification_token)
     except Exception:
-        # The account already exists at this point — don't fail registration over
-        # a flaky send. The user can request a fresh link from the login page.
-        pass
+        # Nothing durable exists yet besides the pending row — surface the
+        # failure so the user knows to retry, rather than claiming success for
+        # a link that never arrived.
+        raise HTTPException(status_code=500, detail="Could not send the verification email. Please try again later.")
 
     return {
-        "message": "Account created. Check your email to verify your address before logging in.",
-        "email": new_user.email,
+        "message": "Check your email to verify your address and finish creating your account.",
+        "email": email,
         "verification_token": None,
     }
 
@@ -232,31 +228,62 @@ def confirm_password_reset(data: PasswordResetConfirm, db: Session = Depends(get
 
 
 @router.post("/verify-email")
-def verify_email(data: EmailVerificationConfirm, db: Session = Depends(get_db)):
+def verify_email(data: EmailVerificationConfirm, db: Session = Depends(get_db), request: Request = None):
     email = verify_email_verification_token(data.token)
     if not email:
         raise HTTPException(status_code=400, detail="Invalid or expired verification link.")
 
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    existing_user = db.query(User).filter(User.email == email).first()
+    if existing_user:
+        # Already verified — link clicked twice, or in a second tab. Idempotent
+        # success rather than an error, since the end state is the same.
+        return {"message": "Email verified — you can now log in."}
 
-    if not user.is_verified:
-        user.is_verified = True
+    pending = db.query(PendingRegistration).filter(PendingRegistration.email == email).first()
+    if not pending:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link.")
+
+    # This is where the account actually comes into existence — see register()'s
+    # docstring comment for why nothing durable existed before this.
+    new_user = User(
+        email=pending.email,
+        hashed_password=pending.hashed_password,
+        full_name=pending.full_name,
+        is_verified=True,
+    )
+    db.add(new_user)
+    db.delete(pending)
+    try:
         db.commit()
+    except IntegrityError:
+        # Race: two verify-email requests for the same pending signup landed at
+        # once. The DB's unique constraint is the real guarantee here.
+        db.rollback()
+        return {"message": "Email verified — you can now log in."}
+    db.refresh(new_user)
+
+    # Every new account starts with the admin-configured free token balance — see
+    # app/services/feature_gate.py's docstring for the full token-economy model.
+    grant_signup_credits(db, new_user)
+
+    track_event(db, EVENT_TYPES["USER_REGISTERED"], FEATURE_AUTH, user_id=new_user.id, request=request)
 
     return {"message": "Email verified — you can now log in."}
 
 
 @router.post("/resend-verification")
 def resend_verification(data: ResendVerificationRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == normalize_email(data.email)).first()
-    if not user or user.is_verified:
-        # Same non-enumerating shape whether the address doesn't exist or is
-        # already verified — don't let this endpoint confirm which.
+    email = normalize_email(data.email)
+    existing_user = db.query(User).filter(User.email == email).first()
+    pending = db.query(PendingRegistration).filter(PendingRegistration.email == email).first()
+
+    if existing_user or not pending:
+        # Same non-enumerating shape whether the address is already verified or
+        # there's no pending signup for it at all — don't let this endpoint
+        # confirm which.
         return {"message": "If that email exists and needs verification, a new link has been sent."}
 
-    verification_token = create_email_verification_token(user.email)
+    verification_token = create_email_verification_token(email)
 
     if not is_email_configured():
         return {
@@ -265,7 +292,7 @@ def resend_verification(data: ResendVerificationRequest, db: Session = Depends(g
         }
 
     try:
-        send_verification_email(user.email, verification_token)
+        send_verification_email(email, verification_token)
     except Exception:
         raise HTTPException(status_code=500, detail="Could not send the verification email. Please try again later.")
 
