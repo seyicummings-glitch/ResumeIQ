@@ -67,6 +67,16 @@ DIFFICULTY_WEIGHT = {"beginner": 1, "intermediate": 2, "advanced": 3}
 
 FALLBACK_CATEGORY = "general_swe"
 
+# QUESTION_FIXTURES (app/data/skill_questions.json) is, today, 100% software-engineering
+# content — there is no non-technical question bank yet. build_assessment() only backfills
+# into that bank for these profession categories (from
+# app.services.learning_roadmap.detect_profession_category); for any other detected
+# profession (marketing, accounting, culinary, skilled trades, ...) it returns fewer/no
+# technical questions rather than ever serving a chef React/Docker trivia. The caller
+# (app/routes/skill_assessment.py) makes up the difference with extra soft-skill scenario
+# questions instead of silently substituting the wrong profession's content.
+_TECH_ADJACENT_CATEGORIES = {"software_engineering", "data_science", "general"}
+
 TECHNICAL_COUNT = 11
 SOFT_COUNT = 4
 
@@ -87,19 +97,22 @@ def distribute_fallback_counts(total_count: int) -> tuple[int, int]:
 
 # Expanded pool so a restarted fallback assessment has real variety to draw
 # from instead of always showing the same "few" scenarios.
+# Deliberately profession-neutral wording (no "sprint", "pull request", "codebase", etc.)
+# so these apply honestly to any candidate's field, not just software engineering — this
+# is the soft-skill portion of the fallback assessment, served regardless of profession.
 SOFT_SCENARIOS = [
     {
         "id": 1,
         "category": "Leadership & Ownership",
         "type": "behavioral",
-        "scenario": "You are midway through a sprint and discover a critical bug in a module you did not write. The original author is on vacation. How do you handle this situation?",
-        "keywords": ["triage", "severity", "reproduce", "test", "communicate", "escalate", "document", "rollback", "owner", "notify"],
+        "scenario": "You are midway through an important piece of work and discover a critical mistake in work someone else on your team produced. That person is unreachable. How do you handle this situation?",
+        "keywords": ["triage", "severity", "verify", "check", "communicate", "escalate", "document", "correct", "owner", "notify"],
     },
     {
         "id": 2,
         "category": "Communication & Conflict",
         "type": "behavioral",
-        "scenario": "A senior colleague insists on an architectural approach you believe will create technical debt. How do you navigate this disagreement professionally and constructively?",
+        "scenario": "A senior colleague insists on an approach you believe will cause problems down the line. How do you navigate this disagreement professionally and constructively?",
         "keywords": ["data", "trade-off", "document", "propose", "alternative", "listen", "compromise", "escalate", "respect", "evidence"],
     },
     {
@@ -113,36 +126,36 @@ SOFT_SCENARIOS = [
         "id": 4,
         "category": "Handling Ambiguity",
         "type": "scenario",
-        "scenario": "You're asked to build a feature, but the requirements are vague and the product owner is unavailable for two days. What do you do in the meantime?",
-        "keywords": ["assumption", "clarify", "document", "prototype", "risk", "scope", "communicate", "reversible", "research", "async"],
+        "scenario": "You're asked to complete a piece of work, but the requirements are vague and the person who requested it is unavailable for two days. What do you do in the meantime?",
+        "keywords": ["assumption", "clarify", "document", "prototype", "risk", "scope", "communicate", "reversible", "research", "confirm"],
     },
     {
         "id": 5,
         "category": "Failure & Learning",
         "type": "behavioral",
-        "scenario": "Describe a time a decision you made caused a production incident or a significant setback. What happened, and what did you change afterward?",
-        "keywords": ["root cause", "postmortem", "accountable", "learn", "process", "monitor", "prevent", "communicate", "fix", "impact"],
+        "scenario": "Describe a time a decision you made caused a significant setback or mistake at work. What happened, and what did you change afterward?",
+        "keywords": ["root cause", "review", "accountable", "learn", "process", "monitor", "prevent", "communicate", "fix", "impact"],
     },
     {
         "id": 6,
         "category": "Cross-team Collaboration",
         "type": "scenario",
-        "scenario": "Another team's changes are blocking your work, and their priorities don't currently include unblocking you. How do you move forward?",
+        "scenario": "Another team's work is blocking your own, and their priorities don't currently include unblocking you. How do you move forward?",
         "keywords": ["align", "stakeholder", "escalate", "workaround", "communicate", "priority", "negotiate", "relationship", "timeline", "unblock"],
     },
     {
         "id": 7,
         "category": "Time Management",
         "type": "scenario",
-        "scenario": "You realize two days before a deadline that a feature will take significantly longer than estimated. Walk me through what you do next.",
+        "scenario": "You realize two days before a deadline that a task will take significantly longer than estimated. Walk me through what you do next.",
         "keywords": ["communicate", "scope", "cut", "risk", "estimate", "stakeholder", "negotiate", "transparent", "plan", "trade-off"],
     },
     {
         "id": 8,
         "category": "Feedback",
         "type": "behavioral",
-        "scenario": "You receive critical feedback on a pull request that you initially disagree with. How do you respond and resolve it?",
-        "keywords": ["listen", "understand", "evidence", "discuss", "compromise", "test", "revise", "respectful", "clarify", "learn"],
+        "scenario": "You receive critical feedback on a piece of work you completed, and you initially disagree with it. How do you respond and resolve it?",
+        "keywords": ["listen", "understand", "evidence", "discuss", "compromise", "review", "revise", "respectful", "clarify", "learn"],
     },
 ]
 
@@ -165,14 +178,30 @@ def build_assessment(
     skills: list[str],
     count: int = TECHNICAL_COUNT,
     exclude_ids: list[int] | None = None,
+    profession_category: str | None = None,
 ) -> list[dict]:
-    """Randomly picks exactly `count` questions (when the bank has that many),
-    preferring the categories matched from `skills`, biased toward
+    """Randomly picks up to `count` questions (fewer only when profession-gated — see
+    below), preferring the categories matched from `skills`, biased toward
     intermediate/advanced difficulty, and avoiding `exclude_ids` (recently
     served questions, e.g. from the user's last attempt) wherever possible so
-    restarting produces a genuinely different set rather than the same one."""
+    restarting produces a genuinely different set rather than the same one.
+
+    profession_category (from
+    app.services.learning_roadmap.detect_profession_category) gates whether an
+    unmatched skill set is allowed to fall back to FALLBACK_CATEGORY / any other
+    category in the bank — see _TECH_ADJACENT_CATEGORIES above. When the detected
+    profession is confidently non-technical and nothing matched, this returns
+    fewer than `count` (possibly zero) rather than ever backfilling with the
+    bank's software-engineering content — the caller is expected to make up the
+    difference with non-technical content (e.g. more soft-skill scenarios)."""
     exclude_ids = set(exclude_ids or [])
-    categories = match_categories(skills) or [FALLBACK_CATEGORY]
+    allow_cross_category_backfill = profession_category is None or profession_category in _TECH_ADJACENT_CATEGORIES
+
+    matched_categories = match_categories(skills)
+    if not matched_categories:
+        categories = [FALLBACK_CATEGORY] if allow_cross_category_backfill else []
+    else:
+        categories = matched_categories
 
     def pool(category_keys, difficulties, avoid_ids):
         return [
@@ -196,6 +225,11 @@ def build_assessment(
         tier2 = pool(categories, ("beginner",), exclude_ids | chosen_ids)
         random.shuffle(tier2)
         selected.extend(tier2[: count - len(selected)])
+
+    if not allow_cross_category_backfill:
+        # The detected profession doesn't fit this (all-technical) bank at all —
+        # stop here rather than reaching into unrelated categories in tiers 3-5.
+        return selected[:count]
 
     # 3) Any category, any difficulty, still unseen — guarantees variety even
     #    when only one or two categories matched the resume.
@@ -227,7 +261,11 @@ def build_assessment(
 
 def pick_soft_scenarios(count: int = SOFT_COUNT, exclude_ids: list[int] | None = None) -> list[dict]:
     """Randomly picks `count` soft-skill scenarios, avoiding `exclude_ids` (the
-    user's most recent attempt) wherever the pool is large enough to allow it."""
+    user's most recent attempt) wherever the pool is large enough to allow it.
+    `count` can exceed len(SOFT_SCENARIOS) — e.g. when the route redistributes a
+    shortfall of profession-gated technical questions here instead — in which
+    case scenarios repeat (never duplicated within the *same* returned set)
+    rather than coming up short."""
     exclude_ids = set(exclude_ids or [])
     pool = [s for s in SOFT_SCENARIOS if s["id"] not in exclude_ids]
     random.shuffle(pool)
@@ -237,6 +275,11 @@ def pick_soft_scenarios(count: int = SOFT_COUNT, exclude_ids: list[int] | None =
         leftover = [s for s in SOFT_SCENARIOS if s["id"] not in chosen_ids]
         random.shuffle(leftover)
         pool.extend(leftover)
+
+    if len(pool) < count and SOFT_SCENARIOS:
+        # True last resort — count exceeds the entire scenario bank, so the
+        # only way to reach it is to repeat a scenario within the same set.
+        pool.extend(random.choices(SOFT_SCENARIOS, k=count - len(pool)))
 
     return pool[:count]
 

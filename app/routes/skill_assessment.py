@@ -12,6 +12,7 @@ from app.security import get_current_user, get_session_id_from_request
 from app.services.analysis_store import get_latest_analysis
 from app.services.resume_structurer import extract_skills_list
 from app.services.platform_settings import is_ai_enabled
+from app.services.learning_roadmap import detect_profession_category
 from app.services.analytics import track_event, EVENT_TYPES, FEATURE_SKILL_ASSESSMENT
 from app.services.feature_gate import check_and_consume, FeatureAccessDenied
 from app.services.skill_assessment import (
@@ -78,7 +79,11 @@ def _recent_sessions(db: Session, user_id: int) -> list[SkillAssessmentSession]:
 
 
 def _build_fallback_question_set(
-    db: Session, combined_skills: list[str], recent: list[SkillAssessmentSession], total_count: int
+    db: Session,
+    combined_skills: list[str],
+    recent: list[SkillAssessmentSession],
+    total_count: int,
+    profession_category: str | None = None,
 ) -> dict:
     _ensure_questions_seeded(db)
     technical_count, soft_count = distribute_fallback_counts(total_count)
@@ -95,8 +100,15 @@ def _build_fallback_question_set(
     ]
 
     all_questions = [_question_to_dict(q) for q in db.query(SkillQuestion).all()]
-    technical = build_assessment(all_questions, combined_skills, count=technical_count, exclude_ids=recent_technical_ids)
-    soft = pick_soft_scenarios(count=soft_count, exclude_ids=recent_soft_ids)
+    technical = build_assessment(
+        all_questions, combined_skills, count=technical_count, exclude_ids=recent_technical_ids,
+        profession_category=profession_category,
+    )
+    # A confidently non-technical profession with no matched skill category can come back
+    # short here (see build_assessment's profession gating in app/services/skill_assessment.py)
+    # rather than ever backfilling with the bank's software-engineering questions — make up
+    # the difference with extra soft-skill scenarios so the total still matches total_count.
+    soft = pick_soft_scenarios(count=soft_count + (technical_count - len(technical)), exclude_ids=recent_soft_ids)
 
     questions = [
         {
@@ -226,6 +238,11 @@ def build_skill_assessment(
 
         combined_skills = list(resume_skills) + list(missing_skills)
         recent = _recent_sessions(db, current_user.id)
+        profession_category = detect_profession_category(
+            target_role=current_user.target_role, industry=current_user.industry,
+            resume_skills=resume_skills, missing_skills=missing_skills,
+            resume_text=resume.raw_text if resume else "",
+        )
 
         question_set = None
         if is_ai_enabled(db):
@@ -240,7 +257,7 @@ def build_skill_assessment(
                 question_count,
             )
         if question_set is None:
-            question_set = _build_fallback_question_set(db, combined_skills, recent, question_count)
+            question_set = _build_fallback_question_set(db, combined_skills, recent, question_count, profession_category)
 
         session = SkillAssessmentSession(
             user_id=current_user.id,

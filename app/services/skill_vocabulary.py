@@ -120,6 +120,32 @@ SKILL_VOCABULARY = [
     "Inventory Control", "Merchandising", "Food Safety", "ServSafe",
     "Front Desk Operations", "Reservations Management", "Guest Relations",
 
+    # --- Culinary Arts & Hospitality ---------------------------------------
+    "Menu Planning", "Menu Costing", "Food Preparation", "Food Handling",
+    "Kitchen Operations", "Kitchen Management", "Knife Skills", "Culinary Techniques",
+    "Baking", "Pastry", "Plating", "Portion Control",
+    "HACCP", "Catering", "Banquet Operations", "Recipe Development",
+    "Line Cooking", "Sous Chef", "Sanitation", "Wine Pairing", "Mixology",
+
+    # --- Engineering (non-software) -----------------------------------------
+    "AutoCAD", "SolidWorks", "Revit", "CAD", "Structural Analysis", "Structural Design",
+    "Civil Engineering", "Mechanical Engineering", "Electrical Engineering",
+    "Construction Management", "HVAC Design", "Manufacturing Engineering",
+    "Industrial Engineering", "Chemical Engineering", "Project Estimation", "MATLAB",
+    "Finite Element Analysis", "GD&T", "Piping Design",
+
+    # --- Skilled Trades ------------------------------------------------------
+    "Electrical Wiring", "Circuit Installation", "NEC Code Compliance", "Plumbing",
+    "Pipefitting", "Carpentry", "Welding", "MIG Welding", "TIG Welding", "Masonry",
+    "HVAC Installation", "HVAC Repair", "Blueprint Reading", "Power Tools",
+    "Preventive Maintenance", "Machining", "Automotive Diagnostics", "Auto Repair",
+
+    # --- Sports & Fitness ------------------------------------------------------
+    "Coaching", "Personal Training", "Strength and Conditioning", "Fitness Assessment",
+    "Athletic Training", "Sports Performance", "Exercise Programming", "Nutrition Planning",
+    "Sports Medicine", "Team Management", "Game Strategy", "Physical Education",
+    "Injury Prevention", "Rehabilitation", "Officiating",
+
     # --- Soft skills -------------------------------------------------------
     "Communication", "Leadership", "Problem Solving", "Teamwork", "Project Management",
     "Time Management", "Collaboration", "Critical Thinking", "Adaptability",

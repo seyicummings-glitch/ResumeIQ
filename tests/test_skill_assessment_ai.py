@@ -41,6 +41,8 @@ def _soft_question(i, category="Leadership"):
 
 def _valid_payload(counts):
     return {
+        "detected_profession": "Backend Engineer",
+        "detected_industry": "Technology",
         "technical_questions": [_hard_question(i) for i in range(counts["technical"])],
         "scenario_questions": [_soft_question(i) for i in range(counts["scenario"])],
         "problem_solving_questions": [_hard_question(i) for i in range(counts["problem_solving"])],

@@ -124,6 +124,12 @@ Job description:
 
 Skills the job wants that aren't clearly on the resume: {gaps}
 
+Before asking anything, determine this candidate's actual profession and field from the job title, job
+description, and resume above. Do NOT default to software engineering — that is only correct if the evidence
+actually points there. A chef gets asked about kitchen operations and food safety, not APIs; an accountant gets
+asked about reconciliation and reporting, not databases; a nurse gets asked about patient care and clinical
+protocol, not code. Every question you ask must be grounded in that actual profession.
+
 You must respond with four fields every turn: "is_clarification_request", "feedback", "question", and
 "questions_answered".
 
@@ -183,8 +189,10 @@ question:
   prompt than to jargon.
   (2) A fresh question once you've gotten sufficient depth on the current topic — specific and appropriately
   challenging for the seniority level implied by the resume and job description, never generic or templated.
-  Ground it in specifics: their actual resume history, technical depth on skills they listed, system-design/
-  architecture thinking, behavioral/soft-skill scenarios, or the gap skills above.
+  Ground it in specifics: their actual resume history, depth on skills/tools/methods they listed relevant to
+  their actual profession, scenario or judgment-call questions realistic for that profession (system-design/
+  architecture thinking only if the profession is genuinely technical/engineering), behavioral/soft-skill
+  scenarios, or the gap skills above.
   - Cover a realistic mix across the session — technical/hard-skill questions, behavioral questions about past
     experience, and role- or domain-specific questions grounded in the job description — the way a real
     interview loop would, not one category repeated the whole time.

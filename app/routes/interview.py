@@ -9,12 +9,7 @@ from app.models.interview_models import InterviewSession
 from app.security import get_current_user, get_session_id_from_request
 from app.services.analysis_store import get_latest_analysis
 from app.services.resume_structurer import extract_skills_list
-from app.services.interview_questions import (
-    BEHAVIORAL_BASE,
-    build_interview_questions,
-    build_system_design_questions,
-    build_role_questions,
-)
+from app.services.interview_questions import BEHAVIORAL_BASE, build_interview_questions, build_role_questions
 from app.services.ai_interviewer import get_interviewer_reply
 from app.services.interview_feedback import generate_interview_feedback
 from app.services.platform_settings import is_ai_enabled
@@ -60,7 +55,11 @@ def get_interview_questions(
     context = _context_for_user(db, current_user.id)
 
     if not context:
-        questions = list(BEHAVIORAL_BASE) + build_system_design_questions("") + build_role_questions("")
+        # No saved analysis at all means zero profession signal — build_role_questions("")
+        # resolves that to "general" and returns a profession-neutral question rather than
+        # assuming software engineering; the SWE-specific system-design question is skipped
+        # entirely here rather than guessed at.
+        questions = list(BEHAVIORAL_BASE) + build_role_questions("")
         return {"questions": questions, "has_analysis": False}
 
     questions = build_interview_questions(context["missing_skills"], context["resume_skills"], context["jd_title"])

@@ -59,6 +59,38 @@ def test_build_assessment_falls_back_to_general_swe_when_no_skills_match():
     assert all(q["category_key"] == "general_swe" for q in questions)
 
 
+def test_build_assessment_falls_back_to_general_swe_when_profession_is_software_engineering():
+    questions = build_assessment(SAMPLE_QUESTIONS, ["cobol"], count=1, profession_category="software_engineering")
+    assert questions
+    assert all(q["category_key"] == "general_swe" for q in questions)
+
+
+def test_build_assessment_never_backfills_swe_content_for_a_non_technical_profession():
+    # The bank (SAMPLE_QUESTIONS/skill_questions.json) is 100% software-engineering
+    # content — a chef's skills never match any category, and the profession is
+    # confidently non-technical, so this must return nothing rather than React/Python
+    # trivia questions.
+    questions = build_assessment(
+        SAMPLE_QUESTIONS, ["Menu Planning", "Knife Skills"], count=5, profession_category="culinary_hospitality"
+    )
+    assert questions == []
+
+
+def test_build_assessment_still_serves_matched_category_for_a_non_technical_profession():
+    # If a skill genuinely matches a bank category, it's still served (tiers 1-2 aren't
+    # gated) — only the cross-category backfill (tiers 3-5) is profession-gated.
+    questions = build_assessment(SAMPLE_QUESTIONS, ["react"], count=1, profession_category="culinary_hospitality")
+    assert questions
+    assert all(q["category_key"] == "react" for q in questions)
+
+
+def test_pick_soft_scenarios_supports_counts_larger_than_the_whole_pool():
+    # The route redistributes a shortfall of profession-gated technical questions here —
+    # count can legitimately exceed len(SOFT_SCENARIOS) (8).
+    scenarios = pick_soft_scenarios(count=15)
+    assert len(scenarios) == 15
+
+
 def test_build_assessment_guarantees_count_even_with_small_bank():
     # Only 7 questions exist total; asking for 11 must still return 11 by
     # backfilling/reusing rather than silently returning fewer.

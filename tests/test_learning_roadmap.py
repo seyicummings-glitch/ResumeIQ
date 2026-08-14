@@ -71,7 +71,32 @@ def test_detect_profession_category_healthcare():
 
 def test_detect_profession_category_falls_back_to_general_when_nothing_matches():
     assert detect_profession_category(None, None, [], []) == "general"
-    assert detect_profession_category("Yoga Instructor", None, ["Mindfulness"], []) == "general"
+    assert detect_profession_category("Poet", None, ["Creative Writing"], []) == "general"
+
+
+def test_detect_profession_category_culinary_hospitality():
+    assert detect_profession_category("Chef", None, ["Menu Planning", "Knife Skills"], ["Food Safety"]) == "culinary_hospitality"
+    assert detect_profession_category(None, None, [], [], resume_text="Sous chef with five years of kitchen experience.") == "culinary_hospitality"
+
+
+def test_detect_profession_category_engineering_other_not_confused_with_software():
+    assert detect_profession_category("Civil Engineer", None, ["AutoCAD", "Structural Analysis"], []) == "engineering_other"
+    assert detect_profession_category("Mechanical Engineer", None, [], []) == "engineering_other"
+
+
+def test_detect_profession_category_skilled_trades():
+    assert detect_profession_category("Electrician", None, ["Electrical Wiring", "NEC Code Compliance"], []) == "skilled_trades"
+
+
+def test_detect_profession_category_sports_fitness():
+    assert detect_profession_category("Yoga Instructor", None, ["Mindfulness"], []) == "sports_fitness"
+    assert detect_profession_category("Personal Trainer", None, ["Strength and Conditioning"], []) == "sports_fitness"
+
+
+def test_detect_profession_category_software_engineering_not_triggered_by_bare_engineer():
+    # A bare "engineer" title alone (no software-specific signal) must never default
+    # to software_engineering — that was the actual bug behind wrong-profession content.
+    assert detect_profession_category("Engineer", None, [], []) == "general"
 
 
 def test_detect_profession_category_uses_resume_text_when_other_signals_are_thin():

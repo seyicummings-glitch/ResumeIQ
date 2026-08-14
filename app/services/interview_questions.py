@@ -6,35 +6,44 @@ selected deterministically from a fixed bank using regex/keyword matching
 against the candidate's resume skills, the job description's missing skills,
 and the job title. Mirrors the style of matching_engine.py: pure functions,
 no FastAPI/SQLAlchemy imports.
+
+The System Design and default Role-Specific content (below) is
+software-engineering-specific and only served when
+app.services.learning_roadmap.detect_profession_category resolves to
+"software_engineering" for the given job title/skills — everything else
+(BEHAVIORAL_BASE, the technical depth-check/gap questions) is written to be
+profession-neutral so it's honestly reusable for any candidate.
 """
 import re
+
+from app.services.learning_roadmap import detect_profession_category
 
 BEHAVIORAL_BASE = [
     {
         "id": 101,
         "category": "Behavioral",
         "difficulty": "Medium",
-        "question": "Tell me about a time you had to deliver a project under significant technical constraints. How did you manage trade-offs between quality and deadline?",
-        "tip": "Use the STAR method: Situation, Task, Action, Result. Quantify the outcome — 'shipped on time' is weak; 'shipped 3 days early with zero P1 bugs' is strong.",
-        "sample_answer": "At my last role, we had 6 weeks to complete a critical feature before a client deadline. I scoped a tiered approach: core functionality first with full test coverage, then progressive enhancement. I cut three 'nice to have' features and documented the trade-offs for stakeholders. We shipped on schedule with 99.97% uptime — a significant improvement over the previous release.",
-        "relevance": "Tests decision-making under pressure — common in all engineering roles",
+        "question": "Tell me about a time you had to deliver something important under significant constraints (time, resources, or unclear requirements). How did you manage the trade-offs between quality and the deadline?",
+        "tip": "Use the STAR method: Situation, Task, Action, Result. Quantify the outcome where you can — a vague 'it went well' is weak; a specific, measurable result is strong.",
+        "sample_answer": "At my last role, we had six weeks to deliver a critical piece of work before a client deadline. I scoped a tiered approach: the essential requirements first, done properly, then extras only if time allowed. I cut a few 'nice to have' items and documented the trade-offs for stakeholders up front. We delivered on schedule with no quality complaints — a real improvement over how the previous project had gone.",
+        "relevance": "Tests decision-making under pressure — relevant to any role",
     },
     {
         "id": 102,
         "category": "Behavioral",
         "difficulty": "Easy",
-        "question": "How do you stay current with new technologies, and how do you decide which ones are worth adopting in a production codebase?",
-        "tip": "They want intellectual curiosity balanced with pragmatism. Don't just list newsletters — explain your evaluation framework.",
-        "sample_answer": "I follow a three-stage filter: (1) awareness — I track releases through a few newsletters and changelog subscriptions; (2) evaluation — I prototype in isolation to understand real trade-offs vs. marketing claims; (3) production adoption — only after a clear problem fit, team buy-in, and a rollback plan. This keeps me curious but not reckless.",
-        "relevance": "Common culture-fit question about pragmatic technology adoption",
+        "question": "How do you stay current with new developments, tools, or best practices in your field, and how do you decide which ones are actually worth adopting into your regular work?",
+        "tip": "They want intellectual curiosity balanced with pragmatism. Don't just list where you get information — explain your evaluation framework.",
+        "sample_answer": "I follow a three-stage filter: (1) awareness — I track what's new through a few trusted publications and professional communities; (2) evaluation — I try it out in a low-stakes way first to understand the real trade-offs versus the hype; (3) real adoption — only after a clear fit for an actual problem, and a plan to back out if it doesn't work. That keeps me curious without being reckless.",
+        "relevance": "Common culture-fit question about pragmatic adoption of new ideas",
     },
     {
         "id": 103,
         "category": "Behavioral",
         "difficulty": "Medium",
-        "question": "Describe a time you disagreed with a technical decision made by your team or manager. How did you handle it?",
-        "tip": "Show you can advocate for your view while respecting process. The best answers demonstrate both technical confidence and emotional intelligence.",
-        "sample_answer": "My team was about to adopt a third-party auth library that I'd evaluated and found had poor maintenance signals. I wrote a one-pager comparing it to the alternatives — lifecycle, community, licensing risk — and proposed an alternative. My manager appreciated the structured argument even though we ultimately went with the original choice due to time constraints. I documented my concerns so we could revisit at the 6-month mark.",
+        "question": "Describe a time you disagreed with a decision made by your team or manager. How did you handle it?",
+        "tip": "Show you can advocate for your view while respecting process. The best answers demonstrate both confidence in your reasoning and emotional intelligence.",
+        "sample_answer": "My team was about to move forward with an approach I'd looked into and found had real downsides. I put together a short, clear comparison against the alternatives — cost, risk, long-term impact — and proposed a different option. My manager appreciated the structured argument even though we ultimately kept the original choice due to time constraints. I documented my concerns so we could revisit the decision later.",
         "relevance": "Tests maturity and ability to handle disagreement professionally",
     },
 ]
@@ -145,7 +154,22 @@ def build_technical_questions(missing_skills: list, resume_skills: list) -> list
     return questions[:4]
 
 
-def build_system_design_questions(jd_title: str) -> list:
+def _resolve_profession_category(jd_title: str, profession_category: str | None) -> str:
+    """Callers that already know the detected profession (build_interview_questions,
+    which has resume_skills/missing_skills too) pass it in directly; standalone callers
+    (including these functions' own unit tests) fall back to detecting from jd_title
+    alone, which is enough to correctly resolve titles like "Backend Engineer"."""
+    if profession_category is not None:
+        return profession_category
+    return detect_profession_category(target_role=jd_title, industry=None, resume_skills=[], missing_skills=[])
+
+
+def build_system_design_questions(jd_title: str, profession_category: str | None = None) -> list:
+    # System design (data modeling, scaling, exactly-once semantics) is a software-engineering-
+    # specific interview format — never served for a detected profession that isn't technical.
+    if _resolve_profession_category(jd_title, profession_category) != "software_engineering":
+        return []
+
     questions = []
     title = (jd_title or "").lower()
 
@@ -177,7 +201,25 @@ def build_system_design_questions(jd_title: str) -> list:
     return questions
 
 
-def build_role_questions(jd_title: str) -> list:
+def _generic_role_question() -> dict:
+    return {
+        "id": 402,
+        "category": "Role-Specific",
+        "difficulty": "Medium",
+        "question": "Tell me about how you take ownership of your work from start to finish — what does doing your job well look like day to day, and how do you make sure quality stays high?",
+        "tip": "They want to see accountability beyond just completing a task — planning ahead, catching your own mistakes, and following through rather than considering it done the moment you hand it off.",
+        "sample_answer": "Owning my work means I don't consider something finished until it's actually delivered correctly and the people it affects know what changed. I check my own work against what was asked before handing it off, flag risks early rather than letting them become surprises later, and follow up afterward to make sure it actually worked as intended in practice.",
+        "relevance": "Tests ownership mindset and follow-through, relevant to any role",
+    }
+
+
+def build_role_questions(jd_title: str, profession_category: str | None = None) -> list:
+    # The senior/on-call variants below are software-engineering-specific (code review,
+    # production ownership) — any other detected profession gets a profession-neutral
+    # ownership question instead, never these verbatim.
+    if _resolve_profession_category(jd_title, profession_category) != "software_engineering":
+        return [_generic_role_question()]
+
     title = (jd_title or "").lower()
 
     if re.search(r"senior|staff|lead|principal", title):
@@ -207,10 +249,16 @@ def build_role_questions(jd_title: str) -> list:
 
 
 def build_interview_questions(missing_skills: list, resume_skills: list, jd_title: str) -> list:
-    """Orchestrator: full personalized question set for a given analysis."""
+    """Orchestrator: full personalized question set for a given analysis. Detects the
+    profession once (from all available signal — title, resume skills, and gap skills)
+    so the System Design / Role-Specific sections below are gated consistently rather
+    than each re-guessing from jd_title alone."""
+    category = detect_profession_category(
+        target_role=jd_title, industry=None, resume_skills=resume_skills, missing_skills=missing_skills,
+    )
     return (
         list(BEHAVIORAL_BASE)
         + build_technical_questions(missing_skills, resume_skills)
-        + build_system_design_questions(jd_title)
-        + build_role_questions(jd_title)
+        + build_system_design_questions(jd_title, profession_category=category)
+        + build_role_questions(jd_title, profession_category=category)
     )

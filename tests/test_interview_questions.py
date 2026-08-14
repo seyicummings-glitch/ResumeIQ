@@ -80,6 +80,16 @@ def test_system_design_always_includes_url_shortener():
     assert all(q["category"] == "System Design" and q["difficulty"] == "Hard" for q in questions)
 
 
+def test_system_design_empty_for_a_non_software_engineering_title():
+    assert build_system_design_questions("Head Chef") == []
+
+
+def test_system_design_empty_when_profession_category_explicitly_non_technical():
+    # Even with a title that would otherwise look ambiguous, an explicit
+    # non-software-engineering profession_category always wins.
+    assert build_system_design_questions("Backend Engineer", profession_category="culinary_hospitality") == []
+
+
 def test_system_design_adds_payments_question_for_fintech_title():
     questions = build_system_design_questions("Senior Fintech Backend Engineer")
     ids = [q["id"] for q in questions]
@@ -111,6 +121,18 @@ def test_role_questions_default_variant():
     assert "on-call" in questions[0]["question"].lower()
 
 
+def test_role_questions_generic_for_a_non_software_engineering_title():
+    questions = build_role_questions("Head Chef")
+    assert len(questions) == 1
+    assert "on-call" not in questions[0]["question"].lower()
+    assert "ownership" in questions[0]["relevance"].lower()
+
+
+def test_role_questions_generic_when_profession_category_explicitly_non_technical():
+    questions = build_role_questions("Backend Engineer", profession_category="culinary_hospitality")
+    assert "on-call" not in questions[0]["question"].lower()
+
+
 def test_build_interview_questions_orchestrates_all_sections():
     questions = build_interview_questions(
         missing_skills=["Docker"],
@@ -122,3 +144,16 @@ def test_build_interview_questions_orchestrates_all_sections():
     assert "Technical" in categories
     assert "System Design" in categories
     assert "Role-Specific" in categories
+
+
+def test_build_interview_questions_never_returns_system_design_for_a_chef():
+    questions = build_interview_questions(
+        missing_skills=["Food Safety"],
+        resume_skills=["Menu Planning", "Knife Skills"],
+        jd_title="Head Chef",
+    )
+    categories = [q["category"] for q in questions]
+    assert "System Design" not in categories
+    assert categories.count("Behavioral") == 3  # still gets the profession-neutral base
+    role_question = next(q for q in questions if q["category"] == "Role-Specific")
+    assert "on-call" not in role_question["question"].lower()

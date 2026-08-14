@@ -241,10 +241,14 @@ def get_provider(skill: str) -> str:
 
 _PROFESSION_KEYWORDS = {
     "software_engineering": [
-        r"software", r"\bdeveloper\b", r"\bengineer(ing)?\b", r"programming", r"\bdocker\b", r"\bkubernetes\b",
-        r"\bapi\b", r"\bbackend\b", r"\bfrontend\b", r"full.?stack", r"\bdevops\b", r"\bsql\b", r"\bpython\b",
-        r"javascript", r"\bjava\b", r"\breact\b", r"\bnode(\.js)?\b", r"\bgit\b", r"cloud comput",
-        r"\bci/cd\b", r"computer science",
+        # Deliberately NOT a bare \bengineer(ing)?\b — that word alone spans civil,
+        # mechanical, electrical, sales, and many other engineering disciplines, and
+        # was previously winning ties against those categories' own, more specific
+        # patterns just by being listed first in this dict.
+        r"software", r"\bdeveloper\b", r"software engineer", r"\bsde\b", r"programming", r"\bdocker\b",
+        r"\bkubernetes\b", r"\bapi\b", r"\bbackend\b", r"\bfrontend\b", r"full.?stack", r"\bdevops\b",
+        r"\bsql\b", r"\bpython\b", r"javascript", r"\bjava\b", r"\breact\b", r"\bnode(\.js)?\b", r"\bgit\b",
+        r"cloud comput", r"\bci/cd\b", r"computer science",
     ],
     "marketing": [
         r"\bmarketing\b", r"\bseo\b", r"content strategy", r"social media", r"\bbrand(ing)?\b", r"\bcampaign\b",
@@ -293,6 +297,29 @@ _PROFESSION_KEYWORDS = {
         r"customer service", r"customer support", r"help desk", r"\bzendesk\b", r"client onboarding",
         r"guest relations", r"front desk", r"retail operations", r"point of sale",
     ],
+    "culinary_hospitality": [
+        r"\bchef\b", r"\bcook\b", r"\bcooking\b", r"\bculinary\b", r"\bkitchen\b", r"\bbaker\b", r"\bbaking\b",
+        r"\bpastry\b", r"\bmenu\b", r"food (prep|preparation|safety)", r"\bservsafe\b", r"\bsous chef\b",
+        r"\bline cook\b", r"\bcaterer\b", r"catering", r"\bhaccp\b", r"\brestaurant\b", r"food service",
+        r"\bbarista\b", r"\bmixolog", r"\bhospitality\b", r"\bsommelier\b",
+    ],
+    "engineering_other": [
+        r"civil engineer", r"mechanical engineer", r"electrical engineer", r"structural engineer",
+        r"\bautocad\b", r"\bsolidworks\b", r"\brevit\b", r"\bcad\b\W", r"structural analysis",
+        r"construction management", r"\bhvac\b", r"manufacturing engineer", r"industrial engineer",
+        r"chemical engineer", r"\bblueprint", r"\bp\.?e\.? license\b", r"\bautocad\b",
+    ],
+    "skilled_trades": [
+        r"\belectrician\b", r"\bplumb(er|ing)\b", r"\bcarpentry\b", r"\bcarpenter\b", r"\bwelding\b",
+        r"\bwelder\b", r"\bhvac technician\b", r"\bmason\b", r"masonry", r"\belectrical wiring\b",
+        r"\bcircuit installation\b", r"\bnec code\b", r"machinist", r"\block\s?smith\b", r"auto mechanic",
+        r"automotive technician", r"\bapprenticeship\b",
+    ],
+    "sports_fitness": [
+        r"\bathlete\b", r"\bcoach(ing)?\b", r"\bpersonal train(er|ing)\b", r"\bfitness\b",
+        r"sports (performance|medicine|management)", r"\bstrength and conditioning\b", r"\breferee\b",
+        r"\bumpire\b", r"physical education", r"\byoga instructor\b", r"athletic trainer",
+    ],
 }
 
 PROFESSION_LABELS = {
@@ -308,6 +335,10 @@ PROFESSION_LABELS = {
     "sales": "Sales",
     "education": "Education",
     "customer_service": "Customer Service",
+    "culinary_hospitality": "Culinary Arts & Hospitality",
+    "engineering_other": "Engineering",
+    "skilled_trades": "Skilled Trades",
+    "sports_fitness": "Sports & Fitness",
     "general": "General Professional",
 }
 

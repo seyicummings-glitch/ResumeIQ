@@ -102,12 +102,17 @@ def _build_generation_schema(counts: dict[str, int]) -> dict:
     return {
         "type": "object",
         "properties": {
+            "detected_profession": {"type": "string"},
+            "detected_industry": {"type": "string"},
             "technical_questions": _question_array_schema(counts["technical"], include_difficulty=True),
             "scenario_questions": _question_array_schema(counts["scenario"], include_difficulty=False),
             "problem_solving_questions": _question_array_schema(counts["problem_solving"], include_difficulty=True),
             "behavioral_questions": _question_array_schema(counts["behavioral"], include_difficulty=False),
         },
-        "required": ["technical_questions", "scenario_questions", "problem_solving_questions", "behavioral_questions"],
+        "required": [
+            "detected_profession", "detected_industry",
+            "technical_questions", "scenario_questions", "problem_solving_questions", "behavioral_questions",
+        ],
         "additionalProperties": False,
     }
 
@@ -151,10 +156,22 @@ def _build_generation_prompt(
             + "\n".join(f"- {q}" for q in shuffled_recent[:40])
         )
 
-    return f"""Generate a challenging, interview-level skill assessment to evaluate whether this candidate is
-qualified for the role of {role_label}{industry_label}{level_label}. This target role is the PRIMARY driver of
-every question — cover what a real interviewer would test for this specific role, even for skills the resume
-below doesn't mention. The resume is only supporting context, not the source of truth for what to ask.
+    return f"""STEP 1 — Before writing any questions, determine this candidate's actual profession, industry, and
+career field. Use the TARGET ROLE below if one is given; otherwise infer it from the resume's job titles, listed
+skills, and experience. Do NOT default to software engineering — that is only correct if the evidence actually
+points there. A chef needs questions about culinary technique, kitchen operations, food safety, and menu costing;
+an accountant needs questions about financial reporting, reconciliation, and tax compliance; a nurse needs
+questions about patient care, clinical protocol, and triage; a civil engineer needs questions about structural
+analysis and code compliance — none of those should ever come back as a programming/software-engineering
+assessment. Record your conclusion in "detected_profession" (a specific role/title, never something vague like
+"Professional") and "detected_industry".
+
+STEP 2 — Generate a challenging, interview-level skill assessment to evaluate whether this candidate is
+qualified for the role of {role_label}{industry_label}{level_label}. This target role — and the profession you
+just detected — is the PRIMARY driver of every question — cover what a real interviewer in THAT profession would
+test for, even for things the resume below doesn't mention. The resume is only supporting context, not the
+source of truth for what to ask. Every question must be grounded in the DETECTED profession, never generic
+software-engineering content unless the detected profession genuinely is software engineering.
 
 Candidate's resume (supporting context only):
 {resume_text[:4000] if resume_text else "(not provided)"}
@@ -170,21 +187,29 @@ questions, {counts['problem_solving']} Problem-Solving questions, and {counts['b
 questions ({sum(counts.values())} total).
 
 Technical questions:
-- Interview-level difficulty ("intermediate" or "advanced" only — no basic definition trivia). Test applied
-  knowledge of the role's core stack: predicting behavior/output, debugging, justifying a design trade-off, or
-  explaining the "why" behind a practice — not "what is X".
+- Interview-level difficulty ("intermediate" or "advanced" only — no basic definition trivia). Test applied,
+  practical knowledge specific to the DETECTED profession: predicting a real-world outcome, diagnosing what went
+  wrong, justifying a professional judgment call, or explaining the "why" behind a standard practice in that
+  field — not "what is X". For a technical/engineering profession this naturally means code, systems, or
+  calculations; for any other profession it means the equivalent real-world practical knowledge (e.g. a
+  technique or timing judgment call for a chef, a reconciliation discrepancy for an accountant, a triage
+  decision for a nurse).
 - Dedicate roughly a third of these to the GAP skills above — test real conceptual understanding even if the
   resume shows no direct experience with them.
 
 Scenario-Based questions:
-- Realistic, role-specific situations a professional in this exact role would face on the job (production
-  incidents, ambiguous requirements, cross-team friction, technical trade-offs under a deadline). Specific and
-  situational, not abstract.
+- Realistic, role-specific situations a professional in the DETECTED profession would face on the job (a
+  service/production incident specific to that field, an ambiguous request from a client or manager, a
+  cross-team or cross-department conflict, a trade-off under a deadline). Specific and situational, not
+  abstract, and never framed around software/engineering concepts unless the detected profession is technical.
 
 Problem-Solving questions:
-- A concrete problem to reason through out loud — an algorithmic/logic challenge, a system/data-flow design
-  question, or a "how would you approach X" question appropriate for this role and seniority. Should have real
-  depth, not a one-line trivia answer.
+- A concrete problem to reason through out loud, appropriate for the DETECTED profession and seniority — a
+  process, logistics, or resource-planning challenge, or a "how would you approach X" question grounded in real
+  day-to-day work in that field (for a technical/engineering profession this may be an algorithmic or
+  system-design problem; for any other profession it's the equivalent structured reasoning problem, e.g.
+  planning a week's menu within a food-cost budget, or restructuring a sales territory). Should have real depth,
+  not a one-line trivia answer.
 - Mark difficulty "intermediate" or "advanced".
 
 Behavioral questions:
@@ -203,6 +228,8 @@ _GENERATION_KEYS = ["technical_questions", "scenario_questions", "problem_solvin
 
 
 def _validate_generation_result(result: dict, counts: dict[str, int]) -> bool:
+    if not result.get("detected_profession") or not isinstance(result.get("detected_industry"), str):
+        return False
     for key in _GENERATION_KEYS:
         type_key = key.replace("_questions", "")
         if len(result.get(key, [])) != counts[type_key]:
@@ -233,9 +260,11 @@ def _generate_via_groq(
         target_role, industry, experience_level, resume_text, resume_skills,
         missing_skills, jd_content, recent_questions, counts,
     ) + groq_json_instructions(
-        '"technical_questions", "scenario_questions", "problem_solving_questions", "behavioral_questions" — each '
-        'an array of objects with "category" (string), "question" (string), "expected_answer_points" (string), '
-        'and (for technical_questions/problem_solving_questions only) "difficulty" ("intermediate" or "advanced")'
+        '"detected_profession" (string, a specific role/title — never software engineering unless the evidence '
+        'actually points there), "detected_industry" (string), and "technical_questions", "scenario_questions", '
+        '"problem_solving_questions", "behavioral_questions" — each an array of objects with "category" (string), '
+        '"question" (string), "expected_answer_points" (string), and (for technical_questions/'
+        'problem_solving_questions only) "difficulty" ("intermediate" or "advanced")'
     )
 
     client = groq_client(api_key)
@@ -289,8 +318,8 @@ def generate_assessment_questions(
     total_count: int = DEFAULT_TOTAL_COUNT,
     ai_enabled: bool = True,
 ) -> dict | None:
-    """Returns {"technical_questions": [...], "scenario_questions": [...],
-    "problem_solving_questions": [...], "behavioral_questions": [...]} with
+    """Returns {"detected_profession": str, "detected_industry": str, "technical_questions": [...],
+    "scenario_questions": [...], "problem_solving_questions": [...], "behavioral_questions": [...]} with
     hidden expected_answer_points rubrics, or None if AI is unavailable/
     disabled/fails — callers should fall back to the static question bank."""
     if not ai_enabled:

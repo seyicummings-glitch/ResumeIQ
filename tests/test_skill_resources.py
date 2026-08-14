@@ -102,6 +102,19 @@ def test_get_resource_links_profession_fallback_defaults_to_general_when_categor
     assert "search_query" not in links_none["youtubeUrl"]
 
 
+def test_get_resource_links_profession_fallback_defaults_to_general_for_new_categories_without_curated_video():
+    # detect_profession_category() (app/services/learning_roadmap.py) gained several new
+    # categories (culinary_hospitality, engineering_other, skilled_trades, sports_fitness)
+    # that don't have a verified curated video yet — this must degrade to the safe
+    # "general" fallback rather than ever returning no video / a search-link URL, and
+    # never a wrong/fabricated video.
+    links_general = get_resource_links("Some Totally Uncurated Skill", [], profession_category="general")
+    for category in ("culinary_hospitality", "engineering_other", "skilled_trades", "sports_fitness"):
+        links = get_resource_links("Some Totally Uncurated Skill", [], profession_category=category)
+        assert links["youtubeUrl"] == links_general["youtubeUrl"]
+        assert links["youtubeVideoId"]
+
+
 def test_every_profession_category_fallback_resolves_to_a_real_curated_video():
     from app.services.skill_resources import _PROFESSION_FALLBACK_QUERY
 
